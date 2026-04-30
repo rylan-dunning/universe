@@ -803,16 +803,26 @@ function updatePeerGhosts() {
     g.label.classList.toggle('host', id === net.hostId);
 
     // Project to screen (with off-screen clamping so peer tags stay visible).
-    const wp = g.ship.group.position;
-    const vx = wp.x - camera.position.x;
-    const vy = wp.y - camera.position.y;
-    const vz = wp.z - camera.position.z;
+    // The peer ghost is added to scales.active.scene, whose root is translated
+    // by -shipWorldPos. The camera, however, lives in world space (the local
+    // ship is rendered at the world origin). So to project the ghost we must
+    // use its TRUE world position = local position + scene-root offset, i.e.
+    // s.pos - shipWorldPos. Using g.ship.group.position directly is wrong
+    // because that's scene-local and the further from origin you fly, the
+    // more the tag drifts off the actual ghost.
+    const sp = scales.shipWorldPos;
+    const worldX = s.pos[0] - sp.x;
+    const worldY = s.pos[1] - sp.y;
+    const worldZ = s.pos[2] - sp.z;
+    const vx = worldX - camera.position.x;
+    const vy = worldY - camera.position.y;
+    const vz = worldZ - camera.position.z;
     const fwdX = -camera.matrixWorld.elements[8];
     const fwdY = -camera.matrixWorld.elements[9];
     const fwdZ = -camera.matrixWorld.elements[10];
     const inFront = (vx * fwdX + vy * fwdY + vz * fwdZ) > 0;
 
-    const v = wp.clone().project(camera);
+    const v = new THREE.Vector3(worldX, worldY, worldZ).project(camera);
     let nx = v.x, ny = v.y;
     const onScreen = inFront && nx > -1 && nx < 1 && ny > -1 && ny < 1;
 
@@ -1528,8 +1538,18 @@ function showWinBanner() {
 function projectAlienOverlays() {
   const w = window.innerWidth, h = window.innerHeight;
   const cx = w * 0.5, cy = h * 0.5;
+  // Aliens are added to the active scene, whose root is translated by
+  // -shipWorldPos. The camera lives in world space, so we must project the
+  // alien's TRUE world position (mesh local pos + scene root offset). Using
+  // mesh.position directly drifts more and more the further from origin you
+  // fly — same bug as peer tags.
+  const sp = scales.shipWorldPos;
   for (const [id, v] of alienVisuals) {
-    const wp = v.mesh.position;
+    const mp = v.mesh.position;
+    const worldX = mp.x - sp.x;
+    const worldY = mp.y - sp.y;
+    const worldZ = mp.z - sp.z;
+    const wp = new THREE.Vector3(worldX, worldY, worldZ);
     const vx = wp.x - camera.position.x;
     const vy = wp.y - camera.position.y;
     const vz = wp.z - camera.position.z;
@@ -1541,7 +1561,7 @@ function projectAlienOverlays() {
       v.hpEl.style.transform = 'translate(-9999px, -9999px)';
       continue;
     }
-    const p = wp.clone().project(camera);
+    const p = wp.project(camera);
     if (p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2) {
       v.hpEl.style.transform = 'translate(-9999px, -9999px)';
       continue;

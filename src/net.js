@@ -96,7 +96,27 @@ export class Net {
         this._startTick();
         resolve(this.code);
       });
-      this.peer.on('error', (err) => reject(err));
+      // The PeerJS public broker drops idle peers after a few minutes,
+      // which silently breaks new joins (existing data connections keep
+      // working but the broker no longer accepts new ones for our id).
+      // Reconnect re-registers the same id on the broker.
+      this.peer.on('disconnected', () => {
+        this.onStatus('broker disconnected — reconnecting');
+        try { this.peer.reconnect(); } catch (_) { /* will retry */ }
+      });
+      this.peer.on('error', (err) => {
+        // 'network'/'disconnected' style errors after open shouldn't reject
+        // the original host() promise (room already running). Only errors
+        // before open mean the room never started.
+        if (this.localId) {
+          this.onStatus('peer error: ' + (err && err.type ? err.type : err));
+          if (err && (err.type === 'network' || err.type === 'disconnected')) {
+            try { this.peer.reconnect(); } catch (_) {}
+          }
+          return;
+        }
+        reject(err);
+      });
     });
   }
 
@@ -140,6 +160,12 @@ export class Net {
     this.code = code.toUpperCase();
     this.followingHost = !!follow;    return new Promise((resolve, reject) => {
       this.peer = new window.Peer({ debug: 0 });
+      // Same broker-drop reconnect logic as host — keeps the joiner alive
+      // through long sessions.
+      this.peer.on('disconnected', () => {
+        this.onStatus('broker disconnected — reconnecting');
+        try { this.peer.reconnect(); } catch (_) {}
+      });
       this.peer.on('open', (id) => {
         this.localId = id;
         const conn = this.peer.connect(ROOM_PREFIX + this.code, { reliable: false });
