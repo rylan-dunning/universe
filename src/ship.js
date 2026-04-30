@@ -92,13 +92,34 @@ export class Ship {
       hull.scale.set(0.6, 0.4, 1.6);
       this.group.add(hull);
     } else if (cfg.body === 'wedge') {
-      // Triangular wedge body, nose at -Z. ConeGeometry's tip is at +Y, so
-      // rotate -90° around X so the tip points along -Z. Center on origin.
-      const hull = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.0, 4), mat);
-      hull.rotation.x = -Math.PI / 2;     // tip → -Z
-      hull.rotation.z = Math.PI / 4;      // diamond cross-section
-      hull.scale.set(1, 0.5, 1);          // flatten vertically into a wedge
-      hull.position.set(0, 0, 0);         // center along Z
+      // Triangular pyramid wedge: nose at -Z, flat rectangular back at +Z.
+      // Wider in X than tall in Y so it actually reads as a wedge silhouette.
+      // Built from explicit vertices to avoid the rotation/scale headaches of
+      // re-orienting a ConeGeometry.
+      const v = new Float32Array([
+        // 0: nose tip (forward)
+         0,    0,    -1.0,
+        // 1..4: back-face rectangle corners (CCW looking from +Z)
+        -0.7, -0.22,  1.0,
+         0.7, -0.22,  1.0,
+         0.7,  0.22,  1.0,
+        -0.7,  0.22,  1.0,
+      ]);
+      const idx = new Uint16Array([
+        // Four triangular side faces (tip → adjacent back corners)
+        0, 1, 2,   // bottom
+        0, 2, 3,   // right
+        0, 3, 4,   // top
+        0, 4, 1,   // left
+        // Back face (two triangles)
+        1, 4, 3,
+        1, 3, 2,
+      ]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(v, 3));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeVertexNormals();
+      const hull = new THREE.Mesh(geo, mat);
       this.group.add(hull);
     } else if (cfg.body === 'capsule') {
       // Rocket: cylindrical fuselage with a pointed nose cone at -Z and a

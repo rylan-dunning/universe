@@ -14,13 +14,12 @@ function randomCode() {
 }
 
 // Clean snapshot of our local ship state to send over the wire.
-function snapshot(localId, name, tier, ship, config, isFollower, dogfight, alive, fires) {
+function snapshot(localId, name, tier, ship, config, isFollower, alive, fires) {
   return {
     id: localId,
     name,
     tier,
     follow: !!isFollower,
-    dogfight: !!dogfight,
     alive: alive !== false,
     fires: fires && fires.length ? fires : undefined,
     config,
@@ -51,9 +50,16 @@ export class Net {
     this.local = null;             // { ship, getShipWorldPos, getTier, getConfig, getName }
 
     // Local-only flags toggled at runtime by the in-game UI.
-    this.dogfight = false;
     this.alive = true;
     this._pendingFires = [];       // outgoing fire events queued for next tick
+    this._pendingHits = [];        // joiner -> host: alien hit reports queued
+
+    // Invasion state. The host owns the simulation; joiners get a copy via roster.
+    // Shape: { active: bool, aliens: [{id,kind,pos,quat,hp,maxHp,size}], fires: [...] }
+    this.invasion = { active: false, aliens: [], fires: [] };
+    this.onInvasionUpdate = () => {};
+    this.onInvasionWin = () => {};
+    this.onAlienHit = () => {};    // host-side: a joiner reported a hit
 
     // Callbacks the rest of the app can hook into.
     this.onPeerJoin   = () => {};
@@ -111,6 +117,9 @@ export class Net {
           if (idx >= 0) this.followers.splice(idx, 1);
         }
         this.onPeerUpdate(conn.peer, msg.snap);
+      } else if (msg.type === 'hit') {
+        // Joiner reports they damaged an alien. Host applies it authoritatively.
+        this.onAlienHit(msg.alienId, msg.damage);
       }
     });
     conn.on('close', () => this._removePeer(conn.peer));
@@ -166,6 +175,14 @@ export class Net {
             if (this.followingHost && msg.followPose) {
               this.local.applyFollowPose(msg.followPose);
             }
+            // Invasion world state from the host.
+            if (msg.invasion) {
+              const wasActive = this.invasion.active;
+              this.invasion = msg.invasion;
+              this.onInvasionUpdate(this.invasion);
+              if (msg.invasion.won) this.onInvasionWin();
+              else if (wasActive && !msg.invasion.active) this.onInvasionUpdate(this.invasion);
+            }
           }
         });
         conn.on('close', () => {
@@ -197,7 +214,6 @@ export class Net {
       { shipWorldPos: this.local.getShipWorldPos(), quat: this.local.ship.quat, visualUnits: this.local.ship.visualUnits },
       this.local.getConfig(),
       this.followingHost,
-      this.dogfight,
       this.alive,
       fires,
     );
@@ -241,13 +257,24 @@ export class Net {
             hostId: this.localId,
             hostTier: snap.tier,
             followPose,
+            invasion: this.invasion,
           });
         } catch (_) {}
+      }
+      // Clear alien-fire events now that they've been broadcast — otherwise
+      // joiners would re-spawn the same bullets every tick.
+      if (this.invasion && this.invasion.fires && this.invasion.fires.length) {
+        this.invasion.fires = [];
       }
     } else if (this.mode === 'join') {
       const conn = this.connsById.get('host');
       if (conn && conn.open) {
         try { conn.send({ type: 'state', snap }); } catch (_) {}
+        // Forward any queued alien hits.
+        for (const h of this._pendingHits) {
+          try { conn.send({ type: 'hit', alienId: h.alienId, damage: h.damage }); } catch (_) {}
+        }
+        this._pendingHits.length = 0;
       }
     }
   }
@@ -267,10 +294,6 @@ export class Net {
     this.followingHost = !!on;
   }
 
-  setDogfight(on) {
-    this.dogfight = !!on;
-  }
-
   setAlive(on) {
     this.alive = !!on;
   }
@@ -283,6 +306,17 @@ export class Net {
       speed,
       t: performance.now(),
     });
+  }
+
+  // Joiner-side: report damage to host. Host accumulates and applies.
+  reportHit(alienId, damage) {
+    if (this.mode !== 'join') return;
+    this._pendingHits.push({ alienId, damage });
+  }
+
+  // Host-side: replace the broadcast invasion world state.
+  setInvasionState(state) {
+    this.invasion = state;
   }
 }
 

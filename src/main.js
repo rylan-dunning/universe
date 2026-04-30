@@ -335,8 +335,8 @@ function frame(now) {
   renderer.render(tier.scene, camera);
   labels.update(camera, window.innerWidth, window.innerHeight);
   updatePeerGhosts();
-  watchTierForDogfight();
-  updateDogfight(dt, input);
+  watchTierForInvasion();
+  updateInvasion(dt, input);
   requestAnimationFrame(frame);
 }
 
@@ -678,12 +678,16 @@ function makePeerLabel(name, peerId) {
   txt.textContent = name;
   el.appendChild(dot);
   el.appendChild(txt);
-  // Click handler: clicking the host's tag (when we're a joiner) toggles follow.
+  // Click handler: clicking the host's tag (when we're a joiner) toggles follow
+  // mode. Clicking ANY other peer's tag warps you to them so it's actually
+  // possible to find each other in a 4.5e9-km solar system.
   el.addEventListener('mousedown', (ev) => ev.stopPropagation());
   el.addEventListener('click', (ev) => {
     ev.stopPropagation();
     if (net.mode === 'join' && peerId === net.hostId) {
       setFollowingHost(!net.followingHost);
+    } else {
+      warpToPeer(peerId);
     }
   });
   peersRoot.appendChild(el);
@@ -744,8 +748,9 @@ net.onPeerUpdate = (id, snap) => {
     g.ship.setConfig(snap.config);
   }
   // Spawn any bullet events the peer fired this tick.
-  // Per spec: players without dogfight mode don't see other players' bullets.
-  if (snap.fires && net.dogfight && snap.tier === scales.activeIndex && scales.activeIndex === 0) {
+  // During invasion mode, everyone sees everyone's bullets so coordinated
+  // fire on aliens reads correctly.
+  if (snap.fires && net.invasion.active && snap.tier === scales.activeIndex && scales.activeIndex === 0) {
     for (const f of snap.fires) {
       spawnBullet(
         snap.id,
@@ -794,9 +799,8 @@ function updatePeerGhosts() {
     const visual = Math.max(s.vis || 0, scales.minShipDisplayUnits[scales.activeIndex]);
     g.ship.group.scale.setScalar(visual / 2.0);
 
-    // Tag styling: highlight host, color dogfighters red.
+    // Tag styling: highlight host. (No more dogfight tinting.)
     g.label.classList.toggle('host', id === net.hostId);
-    g.label.classList.toggle('dogfight', !!s.dogfight);
 
     // Project to screen (with off-screen clamping so peer tags stay visible).
     const wp = g.ship.group.position;
@@ -864,11 +868,7 @@ function showMpStatus(role, code) {
   const followBtn = document.getElementById('mp-toggle-follow');
   if (net.mode === 'join') followBtn.classList.remove('hidden');
   else followBtn.classList.add('hidden');
-  // Anyone in a multiplayer room can use dogfight (gated to Solar at use time).
-  const dfBtn = document.getElementById('mp-toggle-dogfight');
-  if (net.mode === 'host' || net.mode === 'join') dfBtn.classList.remove('hidden');
-  else dfBtn.classList.add('hidden');
-  refreshDogfightAvailability();
+  refreshInvasionAvailability();
 }
 function refreshPeerCount() {
   document.getElementById('mp-peers').textContent = `${peerGhosts.size + 1} connected`;
@@ -930,10 +930,26 @@ document.getElementById('join-code').addEventListener('input', (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// In-game multiplayer toggles: Follow Host (joiner only) + Dogfight Mode.
+// In-game multiplayer toggles + invasion mode (alien combat in Solar system).
+//
+// Architecture:
+//  - Only the HOST runs the alien simulation (movement, shooting, HP).
+//  - Each tick the host broadcasts the full invasion state in the roster.
+//  - Joiners render aliens / alien-bullets from the host's snapshot.
+//  - Joiner-fired bullets that hit an alien locally also send a 'hit' message
+//    to the host so it can apply authoritative damage.
+//  - Alien bullets damage every player locally (one-hit kill, then respawn).
 // ---------------------------------------------------------------------------
-const followBtn = document.getElementById('mp-toggle-follow');
-const dogfightBtn = document.getElementById('mp-toggle-dogfight');
+const followBtn   = document.getElementById('mp-toggle-follow');
+const invasionBtn = document.getElementById('invasion-toggle');
+const invasionHud   = document.getElementById('invasion-hud');
+const winBanner     = document.getElementById('win-banner');
+
+// Solo and host both run the alien simulation locally; only joiners are
+// passive observers. canHostInvasion() centralizes that rule.
+function canHostInvasion() {
+  return net.mode === 'solo' || net.mode === 'host';
+}
 
 function setFollowingHost(on) {
   if (net.mode !== 'join') return;
@@ -949,61 +965,121 @@ followBtn.addEventListener('click', (e) => {
   setFollowingHost(!net.followingHost);
 });
 
-function refreshDogfightAvailability() {
-  // Dogfight only allowed in the Solar system (tier 0). Disable button + force
-  // off in other tiers so you can't carry a machine gun into the galaxy view.
-  const ok = scales.activeIndex === 0;
-  dogfightBtn.classList.toggle('disabled', !ok);
-  dogfightBtn.title = ok
-    ? 'Equip machine gun. Press F to fire.'
-    : 'Dogfight is only available in the Solar system.';
-  if (!ok && net.dogfight) setDogfight(false);
+// ---- Warp to peer (clicking a non-host player tag) ----
+function warpToPeer(peerId) {
+  const g = peerGhosts.get(peerId);
+  if (!g || !g.lastSnap) return;
+  if (g.lastSnap.tier !== scales.activeIndex) return;
+  // Stop the camera follow / card UI so we actually move.
+  follow.active = false;
+  controls.throttle = 0;
+  // Pick a standoff distance proportional to either ship visual.
+  const standoff = Math.max(ship.visualUnits * 12, g.ship.visualUnits * 4, 0.05);
+  // Approach from a constant offset (above-and-behind feel).
+  const dir = new THREE.Vector3(0.3, 0.25, 0.92).normalize();
+  scales.shipWorldPos.set(
+    g.lastSnap.pos[0] + dir.x * standoff,
+    g.lastSnap.pos[1] + dir.y * standoff,
+    g.lastSnap.pos[2] + dir.z * standoff,
+  );
+  // Look toward the peer.
+  const lookDir = new THREE.Vector3(
+    g.lastSnap.pos[0] - scales.shipWorldPos.x,
+    g.lastSnap.pos[1] - scales.shipWorldPos.y,
+    g.lastSnap.pos[2] - scales.shipWorldPos.z,
+  ).normalize();
+  ship.quat.setFromUnitVectors(new THREE.Vector3(0, 0, -1), lookDir);
+  ship.group.quaternion.copy(ship.quat);
+  ship.resetMotion();
+  // Re-snap the smoothed camera state so we don't drift visibly into place.
+  _camQuat.copy(ship.quat);
+  _camInit = false;
 }
-function setDogfight(on) {
-  if (on && scales.activeIndex !== 0) return;
-  net.setDogfight(on);
-  dogfightBtn.textContent = `Dogfight: ${on ? 'ON' : 'OFF'}`;
-  dogfightBtn.classList.toggle('on', on);
-  // Toggling off: clear any in-flight bullets from view (you can no longer
-  // see or be hit by them).
-  if (!on) clearBullets();
+
+// ---- Host-only: launch / end invasion ----
+function refreshInvasionAvailability() {
+  // Solo or host can launch; only allowed in Solar tier.
+  const ok = canHostInvasion() && scales.activeIndex === 0;
+  invasionBtn.disabled = !ok;
+  invasionBtn.classList.toggle('disabled', !ok);
+  const hint = document.getElementById('invasion-hint');
+  if (net.mode === 'join') {
+    invasionBtn.style.display = 'none';
+    if (hint) hint.textContent = 'Only the host can start an invasion. Press F to fire when one is active.';
+  } else {
+    invasionBtn.style.display = '';
+    if (hint) hint.innerHTML = ok
+      ? 'Spawn alien attackers near your ship. Press <b>F</b> to fire your machine gun.'
+      : 'Switch to the <b>Solar</b> system to start an invasion.';
+  }
+  // Auto-end if the host wandered out of Solar mid-invasion.
+  if (canHostInvasion() && net.invasion.active && scales.activeIndex !== 0) {
+    endInvasion(false);
+  }
 }
-dogfightBtn.addEventListener('click', (e) => {
+invasionBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  if (dogfightBtn.classList.contains('disabled')) return;
-  setDogfight(!net.dogfight);
+  if (invasionBtn.disabled) return;
+  if (net.invasion.active) {
+    endInvasion(false);
+  } else {
+    const fighters = parseInt(document.getElementById('is-fighters').value, 10);
+    const motherships = parseInt(document.getElementById('is-motherships').value, 10);
+    startInvasion(fighters, motherships);
+  }
 });
 
+// ---- Bottom-center scale tier picker ----
+const scaleBtns = document.querySelectorAll('#scale-bar .scale-btn');
+scaleBtns.forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const tier = parseInt(btn.dataset.tier, 10);
+    if (tier === scales.activeIndex) return;
+    controls.scaleRequest = tier;
+  });
+});
+function refreshScaleBar() {
+  scaleBtns.forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.tier, 10) === scales.activeIndex);
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Dogfight mode: bullets, hit detection, explosion, respawn.
-// All bullets live in *world* (tier-unit) space; rendered relative to the
-// floating-origin scene each frame.
+// Bullets — used in invasion mode by players (and by aliens via the
+// invasion.fires array fed from the host).
+//
+// Bullet speed is scaled to the player's *visual* size so they're always
+// readable on screen. The previous tier-max-speed approach made bullets fly
+// 7 million km/sec — invisible after one frame.
 // ---------------------------------------------------------------------------
 const bullets = [];                  // { ownerId, pos, dir, speed, ttl, mesh }
-const explosions = [];               // { mesh, ttl, life }
+const explosions = [];               // { mesh, ttl, life, base, posWorld }
 let lastFireTime = 0;
-const FIRE_COOLDOWN = 0.08;          // seconds between local shots (~12/s)
+const FIRE_COOLDOWN = 0.1;           // seconds between local shots (~10/s)
 let deadUntil = 0;                   // performance.now() in ms; we're "dead" until then
 const RESPAWN_DELAY_MS = 1500;
+const PLAYER_BULLET_DAMAGE = 1;      // damage per bullet vs aliens
 
-function bulletSpeed() {
-  // Comfortably faster than ship boost so shots actually hit.
-  return scales.currentMaxSpeed * 1.2;
+function bulletSpeedFor(visualUnits) {
+  // ~80 ship-lengths per second. Floor so even tiny ships have visible tracers.
+  return Math.max(visualUnits * 80, 1.0);
 }
-function bulletTTL() {
-  // Range = speed * ttl. 1.0s gives a generous reach without choking the scene.
-  return 1.0;
-}
-function bulletVisualSize() {
-  // Make bullets readable at any ship scale.
-  return Math.max(ship.visualUnits * 0.25, 0.02);
+function bulletTTL() { return 1.5; }  // seconds (range = speed * ttl)
+function bulletVisualSize(visualUnits) {
+  return Math.max(visualUnits * 0.12, 0.05);
 }
 
 function spawnBullet(ownerId, posWorld, dir, speed) {
-  if (scales.activeIndex !== 0) return;  // dogfight is solar-only
-  const mat = new THREE.MeshBasicMaterial({ color: ownerId === net.localId ? 0xfff05c : 0xff7a7a });
+  if (scales.activeIndex !== 0) return;
+  const isLocal = ownerId === net.localId;
+  const isAlien = ownerId === '__alien';
+  const color = isAlien ? 0xff3344 : (isLocal ? 0xfff05c : 0xffae3a);
+  const mat = new THREE.MeshBasicMaterial({ color });
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 6, 6), mat);
-  mesh.scale.setScalar(bulletVisualSize());
+  // Alien bullets get a fixed visible size; player bullets scale with ship.
+  const size = isAlien ? 120 : bulletVisualSize(ship.visualUnits);
+  mesh.scale.setScalar(size);
   scales.active.scene.add(mesh);
   bullets.push({
     ownerId,
@@ -1015,7 +1091,7 @@ function spawnBullet(ownerId, posWorld, dir, speed) {
   });
 }
 
-function spawnExplosion(wx, wy, wz) {
+function spawnExplosion(wx, wy, wz, baseSize) {
   if (scales.activeIndex !== 0) return;
   const mat = new THREE.MeshBasicMaterial({
     color: 0xffae3a, transparent: true, opacity: 0.9,
@@ -1023,8 +1099,12 @@ function spawnExplosion(wx, wy, wz) {
   const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), mat);
   mesh.position.set(wx, wy, wz);
   scales.active.scene.add(mesh);
-  const life = 0.7;
-  explosions.push({ mesh, ttl: life, life, base: Math.max(ship.visualUnits * 2, 0.5) });
+  const life = 0.9;
+  explosions.push({
+    mesh, ttl: life, life,
+    base: baseSize || Math.max(ship.visualUnits * 2, 0.5),
+    posWorld: new THREE.Vector3(wx, wy, wz),
+  });
 }
 
 function clearBullets() {
@@ -1034,27 +1114,36 @@ function clearBullets() {
   }
   bullets.length = 0;
 }
+function clearExplosions() {
+  for (const e of explosions) {
+    if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
+    e.mesh.geometry.dispose(); e.mesh.material.dispose();
+  }
+  explosions.length = 0;
+}
 
 function fireBullet() {
   if (scales.activeIndex !== 0) return;
-  if (!net.dogfight) return;
+  if (!net.invasion.active) return;     // gun only works during an invasion
   if (performance.now() < deadUntil) return;
   const now = performance.now() / 1000;
   if (now - lastFireTime < FIRE_COOLDOWN) return;
   lastFireTime = now;
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
   // Spawn just ahead of the nose so we don't shoot ourselves.
-  const offset = ship.visualUnits * 1.2;
+  const offset = ship.visualUnits * 1.4;
   const pos = scales.shipWorldPos.clone().addScaledVector(forward, offset);
-  const speed = bulletSpeed();
+  const speed = bulletSpeedFor(ship.visualUnits);
   spawnBullet(net.localId, pos, forward, speed);
-  // Tell other clients via next snapshot.
   if (net.mode !== 'solo') net.queueFire(pos, forward, speed);
 }
 
-function explodeLocal() {
+function explodePlayer() {
   if (performance.now() < deadUntil) return;
-  spawnExplosion(scales.shipWorldPos.x, scales.shipWorldPos.y, scales.shipWorldPos.z);
+  spawnExplosion(
+    scales.shipWorldPos.x, scales.shipWorldPos.y, scales.shipWorldPos.z,
+    Math.max(ship.visualUnits * 4, 1.0),
+  );
   deadUntil = performance.now() + RESPAWN_DELAY_MS;
   net.setAlive(false);
   ship.resetMotion();
@@ -1064,7 +1153,6 @@ function maybeRespawn() {
   if (deadUntil === 0) return;
   if (performance.now() < deadUntil) return;
   deadUntil = 0;
-  // Restart at the solar spawn.
   scales.shipWorldPos.copy(scales.active.spawn);
   ship.resetMotion();
   ship.resetOrientation();
@@ -1073,37 +1161,458 @@ function maybeRespawn() {
   controls.throttle = 0;
 }
 
-function updateDogfight(dt, input) {
-  // Force dogfight off when not in solar (defensive — toggle button also gates).
-  if (scales.activeIndex !== 0 && net.dogfight) setDogfight(false);
+// ---------------------------------------------------------------------------
+// Aliens (host-side authoritative simulation).
+//
+// Aliens live in world (km) coordinates and are big enough to be visible at
+// solar scale. Each alien is rendered on every client; only the host runs the
+// AI / shooting / HP logic.
+// ---------------------------------------------------------------------------
+const FIGHTER_SIZE_KM    = 800;       // radius-ish; visible from a distance
+const MOTHERSHIP_SIZE_KM = 8000;
+const FIGHTER_HP    = 4;
+const MOTHERSHIP_HP = 30;
+const FIGHTER_SPEED    = 200;         // km / sec
+const MOTHERSHIP_SPEED = 50;
+const FIGHTER_BULLET_SPEED    = 6000; // km / sec (alien bullets)
+const MOTHERSHIP_BULLET_SPEED = 4000;
+const FIGHTER_FIRE_PERIOD    = 1.4;   // seconds
+const MOTHERSHIP_FIRE_PERIOD = 0.8;
+const ALIEN_ENGAGE_RANGE_KM  = 600_000;
+const JUPITER_ORBIT_KM = 5.203 * 1.495978707e8;
 
-  // Fire while F is held (rate-limited).
+// Host-side mutable simulation. Each entry: { id, kind, pos, vel, quat, hp,
+// maxHp, size, fireCd }.
+let hostAliens = [];
+let hostAlienFires = [];   // events queued for the next snapshot tick
+let hostNextAlienId = 1;
+let hostInvasionWonAt = 0;
+
+// Client-side: meshes for rendering aliens + healthbar overlays.
+// Map alienId -> { mesh, hpEl, fillEl, lastHp, kind, size }
+const alienVisuals = new Map();
+
+function makeFighterMesh() {
+  // Spiky low-poly fighter: octahedron core + cone "nose" + two side fins.
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x441122, emissive: 0xff4466, emissiveIntensity: 0.35,
+    flatShading: true, roughness: 0.6,
+  });
+  const accent = new THREE.MeshStandardMaterial({
+    color: 0xff7a7a, emissive: 0xff5566, emissiveIntensity: 0.6, flatShading: true,
+  });
+  const core = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0), mat);
+  core.scale.set(0.9, 0.5, 1.6);
+  g.add(core);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.0, 4), accent);
+  nose.rotation.x = -Math.PI / 2;
+  nose.position.set(0, 0, -1.5);
+  g.add(nose);
+  const finGeo = new THREE.ConeGeometry(0.55, 1.6, 3);
+  const fL = new THREE.Mesh(finGeo, mat);
+  fL.rotation.z = Math.PI / 2; fL.scale.set(0.3, 1, 0.6);
+  fL.position.set(-1.0, 0, 0.4);
+  g.add(fL);
+  const fR = fL.clone();
+  fR.position.set(1.0, 0, 0.4); fR.scale.set(0.3, 1, 0.6); fR.rotation.z = -Math.PI / 2;
+  g.add(fR);
+  return g;
+}
+function makeMothershipMesh() {
+  // Big dodecahedron with a glowing equatorial ring.
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x331a3a, emissive: 0x882266, emissiveIntensity: 0.35,
+    flatShading: true, roughness: 0.7,
+  });
+  const hull = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), mat);
+  hull.scale.set(1.6, 0.7, 1.6);
+  g.add(hull);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.5, 0.12, 8, 24),
+    new THREE.MeshBasicMaterial({ color: 0xff4488 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  g.add(ring);
+  const halo = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(2.0, 0),
+    new THREE.MeshBasicMaterial({ color: 0xff7799, wireframe: true, transparent: true, opacity: 0.4 })
+  );
+  g.add(halo);
+  return g;
+}
+
+function makeAlienHpOverlay(name) {
+  const el = document.createElement('div');
+  el.className = 'alien-hp';
+  const nm = document.createElement('div');
+  nm.className = 'ah-name';
+  nm.textContent = name;
+  const bar = document.createElement('div');
+  bar.className = 'ah-bar';
+  const fill = document.createElement('div');
+  fill.className = 'ah-fill';
+  bar.appendChild(fill);
+  el.appendChild(nm);
+  el.appendChild(bar);
+  peersRoot.appendChild(el);
+  return { el, fill };
+}
+
+function ensureAlienVisual(alien) {
+  let v = alienVisuals.get(alien.id);
+  if (!v) {
+    const mesh = alien.kind === 'fighter' ? makeFighterMesh() : makeMothershipMesh();
+    // size is the half-extent in km; mesh is ~2 units across, so scale by size.
+    mesh.scale.setScalar(alien.size);
+    scales.active.scene.add(mesh);
+    const name = alien.kind === 'fighter' ? 'FIGHTER' : 'MOTHERSHIP';
+    const { el, fill } = makeAlienHpOverlay(name);
+    v = { mesh, hpEl: el, fillEl: fill, lastHp: alien.hp, kind: alien.kind, size: alien.size };
+    alienVisuals.set(alien.id, v);
+  }
+  return v;
+}
+
+function destroyAlienVisual(id) {
+  const v = alienVisuals.get(id);
+  if (!v) return;
+  if (v.mesh.parent) v.mesh.parent.remove(v.mesh);
+  v.mesh.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
+  if (v.hpEl && v.hpEl.parentNode) v.hpEl.parentNode.removeChild(v.hpEl);
+  alienVisuals.delete(id);
+}
+function clearAlienVisuals() {
+  for (const id of [...alienVisuals.keys()]) destroyAlienVisual(id);
+}
+
+// ---------------------------------------------------------------------------
+// Host simulation.
+// ---------------------------------------------------------------------------
+function startInvasion(fighters, motherships) {
+  if (!canHostInvasion()) return;
+  if (scales.activeIndex !== 0) return;
+  hostAliens = [];
+  hostAlienFires = [];
+  // Spawn near the player so they're immediately visible. Random direction,
+  // close range — fighters first, motherships farther so the player isn't
+  // inside one on launch.
+  const sp = scales.shipWorldPos;
+  function randomUnit() {
+    const v = new THREE.Vector3(
+      Math.random() - 0.5,
+      (Math.random() - 0.5) * 0.3,   // mostly in the orbital plane
+      Math.random() - 0.5,
+    );
+    if (v.lengthSq() < 1e-6) v.set(1, 0, 0);
+    return v.normalize();
+  }
+  function spawnAt(distanceKm) {
+    return sp.clone().addScaledVector(randomUnit(), distanceKm);
+  }
+  // Motherships: 40,000-60,000 km away (5-7 mothership-radii away).
+  for (let i = 0; i < motherships; i++) {
+    hostAliens.push({
+      id: hostNextAlienId++, kind: 'mothership',
+      pos: spawnAt(40_000 + Math.random() * 20_000), vel: new THREE.Vector3(),
+      quat: new THREE.Quaternion(),
+      hp: MOTHERSHIP_HP, maxHp: MOTHERSHIP_HP,
+      size: MOTHERSHIP_SIZE_KM, fireCd: Math.random() * MOTHERSHIP_FIRE_PERIOD,
+    });
+  }
+  // Fighters: 8,000-20,000 km away — close enough to see immediately.
+  for (let i = 0; i < fighters; i++) {
+    hostAliens.push({
+      id: hostNextAlienId++, kind: 'fighter',
+      pos: spawnAt(8_000 + Math.random() * 12_000), vel: new THREE.Vector3(),
+      quat: new THREE.Quaternion(),
+      hp: FIGHTER_HP, maxHp: FIGHTER_HP,
+      size: FIGHTER_SIZE_KM, fireCd: Math.random() * FIGHTER_FIRE_PERIOD,
+    });
+  }
+  hostInvasionWonAt = 0;
+  publishHostInvasion(true, false);
+  // Update local UI right away so we don't have to wait for a tick.
+  net.onInvasionUpdate(net.invasion);
+  invasionBtn.textContent = 'End Invasion';
+  invasionBtn.classList.add('on');
+}
+
+function endInvasion(won) {
+  if (!canHostInvasion()) return;
+  hostAliens = [];
+  hostAlienFires = [];
+  publishHostInvasion(false, !!won);
+  net.onInvasionUpdate(net.invasion);
+  invasionBtn.textContent = 'Start Invasion';
+  invasionBtn.classList.remove('on');
+  if (won) showWinBanner();
+}
+
+function publishHostInvasion(active, won) {
+  // Build the wire snapshot of the alien world. Accumulate alien fires into
+  // the broadcast state across frames; net._tick clears them after the actual
+  // network broadcast (~12 Hz) so we don't drop most bullets between ticks.
+  const aliens = hostAliens.map(a => ({
+    id: a.id, kind: a.kind,
+    pos: [a.pos.x, a.pos.y, a.pos.z],
+    quat: [a.quat.x, a.quat.y, a.quat.z, a.quat.w],
+    hp: a.hp, maxHp: a.maxHp, size: a.size,
+  }));
+  const prevFires = (net.invasion && net.invasion.fires) || [];
+  const fires = prevFires.concat(hostAlienFires);
+  hostAlienFires = [];
+  net.setInvasionState({ active, won, aliens, fires });
+}
+
+// All known player positions (for host AI targeting). Includes the host itself.
+function allPlayerWorldPositions() {
+  const out = [];
+  if (scales.activeIndex === 0 && net.alive) {
+    out.push({ id: net.localId, pos: scales.shipWorldPos.clone() });
+  }
+  for (const [id, snap] of net.peers) {
+    if (snap.tier !== 0 || snap.alive === false) continue;
+    out.push({ id, pos: new THREE.Vector3(snap.pos[0], snap.pos[1], snap.pos[2]) });
+  }
+  return out;
+}
+
+function hostStepAliens(dt) {
+  if (!canHostInvasion()) return;
+  if (!net.invasion.active) return;
+  if (scales.activeIndex !== 0) return;
+
+  const players = allPlayerWorldPositions();
+  for (const a of hostAliens) {
+    // Pick the nearest player as target.
+    let target = null, bestD2 = Infinity;
+    for (const p of players) {
+      const dx = p.pos.x - a.pos.x, dy = p.pos.y - a.pos.y, dz = p.pos.z - a.pos.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < bestD2) { bestD2 = d2; target = p; }
+    }
+    if (target) {
+      const speed = a.kind === 'fighter' ? FIGHTER_SPEED : MOTHERSHIP_SPEED;
+      const toT = new THREE.Vector3().subVectors(target.pos, a.pos);
+      const dist = toT.length();
+      if (dist > 1e-3) {
+        toT.multiplyScalar(1 / dist);
+        // Approach until they're a comfortable engagement distance, then orbit slowly.
+        const idealRange = a.size * 6;
+        const desire = dist > idealRange ? speed : -speed * 0.2;
+        a.vel.copy(toT).multiplyScalar(desire);
+        // Face the target (local -Z).
+        a.quat.setFromUnitVectors(new THREE.Vector3(0, 0, -1), toT);
+      }
+      // Fire if in range.
+      a.fireCd -= dt;
+      if (a.fireCd <= 0 && dist < ALIEN_ENGAGE_RANGE_KM) {
+        a.fireCd = a.kind === 'fighter' ? FIGHTER_FIRE_PERIOD : MOTHERSHIP_FIRE_PERIOD;
+        const bSpeed = a.kind === 'fighter' ? FIGHTER_BULLET_SPEED : MOTHERSHIP_BULLET_SPEED;
+        // Spawn slightly ahead of the alien, aimed at the target.
+        const offset = a.size * 1.2;
+        const pos = a.pos.clone().addScaledVector(toT, offset);
+        hostAlienFires.push({
+          pos: [pos.x, pos.y, pos.z],
+          dir: [toT.x, toT.y, toT.z],
+          speed: bSpeed,
+        });
+        // Spawn visually on the host too — joiners spawn their copies via the
+        // onInvasionUpdate callback when this fire reaches them.
+        spawnBullet('__alien', pos, toT, bSpeed);
+      }
+    }
+    a.pos.addScaledVector(a.vel, dt);
+  }
+  publishHostInvasion(true, false);
+
+  // Win check: if we ran out of aliens, declare victory and end after a beat.
+  if (hostAliens.length === 0 && !hostInvasionWonAt) {
+    hostInvasionWonAt = performance.now();
+  }
+  if (hostInvasionWonAt && performance.now() - hostInvasionWonAt > 250) {
+    endInvasion(true);
+  }
+}
+
+// Host receives a hit report from a joiner.
+net.onAlienHit = (alienId, damage) => {
+  if (!canHostInvasion()) return;
+  const a = hostAliens.find(x => x.id === alienId);
+  if (!a) return;
+  a.hp -= damage;
+  if (a.hp <= 0) {
+    spawnExplosion(a.pos.x, a.pos.y, a.pos.z, a.size * 1.8);
+    hostAliens = hostAliens.filter(x => x.id !== alienId);
+  }
+};
+
+// Joiners (and host) react to invasion state changes.
+const INVASION_COMBAT_SHIP_M = 1_000_000;   // 1,000 km — readable vs alien sizes
+let _preInvasionShipLengthM = null;          // restored when invasion ends
+let _wasInvasionActive = false;
+net.onInvasionUpdate = (state) => {
+  // Show / hide UI.
+  invasionHud.classList.toggle('hidden', !state.active);
+  document.getElementById('ih-alien-count').textContent = state.aliens.length;
+
+  // Auto-resize the local ship to a sensible combat scale on entry, restore
+  // on exit. Player ship is normally 5 m which is invisible next to a 1,600-km
+  // alien fighter — and bullet speeds scale off ship size, so the gun would
+  // be useless without this rescale.
+  if (state.active && !_wasInvasionActive && scales.activeIndex === 0) {
+    _preInvasionShipLengthM = ship.lengthMeters;
+    ship.lengthMeters = INVASION_COMBAT_SHIP_M;
+    ship.setVisualSize(scales.shipDisplayUnits(ship));
+  } else if (!state.active && _wasInvasionActive && _preInvasionShipLengthM !== null) {
+    ship.lengthMeters = _preInvasionShipLengthM;
+    ship.setVisualSize(scales.shipDisplayUnits(ship));
+    _preInvasionShipLengthM = null;
+  }
+  _wasInvasionActive = state.active;
+
+  // Spawn alien bullets from the host's snapshot. Solo + host already spawned
+  // them locally in hostStepAliens, so only joiners need to do this.
+  if (net.mode === 'join' && state.fires && scales.activeIndex === 0) {
+    for (const f of state.fires) {
+      spawnBullet('__alien',
+        new THREE.Vector3(f.pos[0], f.pos[1], f.pos[2]),
+        new THREE.Vector3(f.dir[0], f.dir[1], f.dir[2]),
+        f.speed);
+    }
+  }
+  // Sync alien meshes.
+  const present = new Set(state.aliens.map(a => a.id));
+  for (const id of [...alienVisuals.keys()]) {
+    if (!present.has(id)) {
+      // Alien just died — spawn an explosion at its last visual position.
+      const v = alienVisuals.get(id);
+      if (v && v.mesh) {
+        spawnExplosion(v.mesh.position.x, v.mesh.position.y, v.mesh.position.z, v.size * 1.8);
+      }
+      destroyAlienVisual(id);
+    }
+  }
+  for (const a of state.aliens) {
+    const v = ensureAlienVisual(a);
+    v.mesh.position.set(a.pos[0], a.pos[1], a.pos[2]);
+    v.mesh.quaternion.set(a.quat[0], a.quat[1], a.quat[2], a.quat[3]);
+    v.fillEl.style.width = `${Math.max(0, (a.hp / a.maxHp) * 100)}%`;
+  }
+  // Host-side: when invasion ends, also push to local network state so we
+  // notice on the next tick.
+  if (!state.active) {
+    clearBullets();
+  }
+};
+
+// Host: aliens are spawned via host code which calls this on win.
+// Joiners: receive `won: true` in invasion msg via the roster handler.
+net.onInvasionWin = () => {
+  showWinBanner();
+};
+
+let _winTimer = 0;
+function showWinBanner() {
+  winBanner.classList.remove('hidden');
+  clearTimeout(_winTimer);
+  _winTimer = setTimeout(() => winBanner.classList.add('hidden'), 3500);
+}
+
+// ---------------------------------------------------------------------------
+// Per-frame: bullets, alien sim, alien-bullet vs player hit detection,
+// player-bullet vs alien hit detection, alien overlay positioning.
+// ---------------------------------------------------------------------------
+function projectAlienOverlays() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const cx = w * 0.5, cy = h * 0.5;
+  for (const [id, v] of alienVisuals) {
+    const wp = v.mesh.position;
+    const vx = wp.x - camera.position.x;
+    const vy = wp.y - camera.position.y;
+    const vz = wp.z - camera.position.z;
+    const fwdX = -camera.matrixWorld.elements[8];
+    const fwdY = -camera.matrixWorld.elements[9];
+    const fwdZ = -camera.matrixWorld.elements[10];
+    const inFront = (vx * fwdX + vy * fwdY + vz * fwdZ) > 0;
+    if (!inFront) {
+      v.hpEl.style.transform = 'translate(-9999px, -9999px)';
+      continue;
+    }
+    const p = wp.clone().project(camera);
+    if (p.x < -1.2 || p.x > 1.2 || p.y < -1.2 || p.y > 1.2) {
+      v.hpEl.style.transform = 'translate(-9999px, -9999px)';
+      continue;
+    }
+    const sx = p.x * cx + cx - 40;
+    const sy = -p.y * cy + cy - 30;
+    v.hpEl.style.transform = `translate(${sx}px, ${sy}px)`;
+  }
+}
+
+function updateInvasion(dt, input) {
+  // Force-stop invasion if we leave Solar.
+  if (scales.activeIndex !== 0 && canHostInvasion() && net.invasion.active) {
+    endInvasion(false);
+  }
+
+  // Local fire (gated to invasion).
   if (input.fire) fireBullet();
   maybeRespawn();
 
-  // Integrate bullets in world space.
+  // Host steps aliens (movement, AI, shooting, win check).
+  hostStepAliens(dt);
+
+  // Integrate bullets locally and run collisions.
+  const sp = scales.shipWorldPos;
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.pos.addScaledVector(b.dir, b.speed * dt);
     b.ttl -= dt;
-    // Bullets live in scene-local coords (= world coords). The scene root is
-    // already translated by -shipWorldPos every frame, so just copy b.pos.
     b.mesh.position.copy(b.pos);
-    // Hit-test: only against US, only if we have dogfight enabled & alive,
-    // and only for bullets we didn't fire.
-    if (b.ownerId !== net.localId && net.dogfight && net.alive && performance.now() >= deadUntil) {
-      const dx = b.pos.x - scales.shipWorldPos.x;
-      const dy = b.pos.y - scales.shipWorldPos.y;
-      const dz = b.pos.z - scales.shipWorldPos.z;
+
+    // ---- Alien bullets vs the local player (one-hit kill) ----
+    if (b.ownerId === '__alien' && net.alive && performance.now() >= deadUntil) {
+      const dx = b.pos.x - sp.x, dy = b.pos.y - sp.y, dz = b.pos.z - sp.z;
       const hitR = Math.max(ship.visualUnits * 1.5, 0.1);
       if (dx * dx + dy * dy + dz * dz < hitR * hitR) {
         scales.active.scene.remove(b.mesh);
         b.mesh.geometry.dispose(); b.mesh.material.dispose();
         bullets.splice(i, 1);
-        explodeLocal();
+        explodePlayer();
         continue;
       }
     }
+
+    // ---- Player bullets (anyone's) vs aliens ----
+    // Each client checks its own bullets only — the OWNER reports the hit.
+    // This avoids double-damage on the host. Host applies damage directly;
+    // joiners send a 'hit' message.
+    if (b.ownerId === net.localId) {
+      let hitId = -1;
+      for (const [id, v] of alienVisuals) {
+        const dx = b.pos.x - v.mesh.position.x;
+        const dy = b.pos.y - v.mesh.position.y;
+        const dz = b.pos.z - v.mesh.position.z;
+        const r = v.size * 1.05;
+        if (dx * dx + dy * dy + dz * dz < r * r) { hitId = id; break; }
+      }
+      if (hitId !== -1) {
+        if (net.mode === 'host') {
+          // Apply damage authoritatively right here.
+          net.onAlienHit(hitId, PLAYER_BULLET_DAMAGE);
+        } else {
+          net.reportHit(hitId, PLAYER_BULLET_DAMAGE);
+        }
+        scales.active.scene.remove(b.mesh);
+        b.mesh.geometry.dispose(); b.mesh.material.dispose();
+        bullets.splice(i, 1);
+        continue;
+      }
+    }
+
     if (b.ttl <= 0) {
       scales.active.scene.remove(b.mesh);
       b.mesh.geometry.dispose(); b.mesh.material.dispose();
@@ -1111,39 +1620,36 @@ function updateDogfight(dt, input) {
     }
   }
 
-  // Animate explosions: expand and fade.
+  // Animate explosions: expand + fade.
   for (let i = explosions.length - 1; i >= 0; i--) {
     const e = explosions[i];
     e.ttl -= dt;
     const u = 1 - Math.max(0, e.ttl) / e.life;
     e.mesh.scale.setScalar(e.base * (0.4 + u * 2.5));
     e.mesh.material.opacity = Math.max(0, 1 - u);
-    // Keep position synced with floating origin (use world coords stored at spawn).
     if (e.ttl <= 0) {
       scales.active.scene.remove(e.mesh);
       e.mesh.geometry.dispose(); e.mesh.material.dispose();
       explosions.splice(i, 1);
     }
   }
+
+  // Reposition alien healthbar overlays.
+  projectAlienOverlays();
 }
 
-// On tier change, the dogfight toggle availability changes too. We hook into
-// the existing transition logic by polling each frame in the main loop.
+// On tier change: invasion is solar-only. Tear down everything if we leave.
 let _lastTier = -1;
-function watchTierForDogfight() {
+function watchTierForInvasion() {
   if (scales.activeIndex !== _lastTier) {
     _lastTier = scales.activeIndex;
-    refreshDogfightAvailability();
-    // Bullets/explosions belong to the previous tier's scene — clear them.
-    for (const b of bullets) {
-      if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
-      b.mesh.geometry.dispose(); b.mesh.material.dispose();
+    refreshInvasionAvailability();
+    refreshScaleBar();
+    clearBullets();
+    clearExplosions();
+    clearAlienVisuals();
+    if (canHostInvasion() && net.invasion.active && scales.activeIndex !== 0) {
+      endInvasion(false);
     }
-    bullets.length = 0;
-    for (const e of explosions) {
-      if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
-      e.mesh.geometry.dispose(); e.mesh.material.dispose();
-    }
-    explosions.length = 0;
   }
 }

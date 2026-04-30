@@ -47,7 +47,26 @@
     <span class="sep">·</span>
     <span id="mp-peers">0 connected</span>
     <button id="mp-toggle-follow" class="mp-toggle hidden" title="Follow the host in formation">Follow Host: OFF</button>
-    <button id="mp-toggle-dogfight" class="mp-toggle hidden" title="Equip machine gun (Solar system only). Press F to fire.">Dogfight: OFF</button>
+  </div>
+
+  <!-- Bottom-center scale tier picker. Same as the 1/2/3 keys. -->
+  <div id="scale-bar">
+    <button data-tier="0" class="scale-btn active">Solar</button>
+    <button data-tier="1" class="scale-btn">Galaxy</button>
+    <button data-tier="2" class="scale-btn">Universe</button>
+  </div>
+
+  <!-- In-invasion overlays. -->
+  <div id="invasion-hud" class="hidden">
+    <div class="ih-label">⚠ INVASION ⚠</div>
+    <div class="ih-aliens">Aliens remaining: <span id="ih-alien-count">—</span></div>
+    <div class="ih-status" id="ih-status">Press F to fire — one hit and you're toast.</div>
+  </div>
+
+  <!-- Win banner (shown briefly when invasion ends in victory). -->
+  <div id="win-banner" class="hidden">
+    <div class="wb-title">VICTORY</div>
+    <div class="wb-sub">All hostiles destroyed. Returning to peaceful mode…</div>
   </div>
 
   <div id="hud">
@@ -98,12 +117,12 @@
       <tr><td><b>Shift</b></td><td>Boost ×10</td></tr>
       <tr><td><b>Ctrl</b></td><td>Brake</td></tr>
       <tr><td><b>Space</b></td><td>Full stop</td></tr>
-      <tr><td><b>1 / 2 / 3</b></td><td>Solar / Galaxy / Universe</td></tr>
+      <tr><td><b>1 / 2 / 3</b></td><td>Solar / Galaxy / Universe (or click bar)</td></tr>
       <tr><td><b>[ / ]</b></td><td>Shrink / grow ship</td></tr>
       <tr><td><b>Drag</b></td><td>Look around</td></tr>
       <tr><td><b>Scroll</b></td><td>Zoom in / out</td></tr>
       <tr><td><b>R</b></td><td>Reset orientation</td></tr>
-      <tr><td><b>F</b></td><td>Fire (dogfight mode)</td></tr>
+      <tr><td><b>F</b></td><td>Fire (during invasion)</td></tr>
       <tr><td><b>H</b></td><td>Toggle help</td></tr>
     </table>
     <p class="hint">Click anywhere to begin.</p>
@@ -125,6 +144,27 @@
       <div class="row"><span class="k">Flame</span><div class="opts" id="opt-flame"></div></div>
       <div class="row"><span class="k">Hull color</span><div class="opts" id="opt-hullColor"></div></div>
       <div class="row"><span class="k">Accent color</span><div class="opts" id="opt-accentColor"></div></div>
+
+      <div class="settings-section" id="settings-invasion">
+        <div class="settings-section-title">Invasion Mode</div>
+        <div class="settings-section-hint" id="invasion-hint">
+          Spawn alien attackers in the Solar system. Press <b>F</b> to fire your machine gun.
+        </div>
+        <div class="row"><span class="k">Fighters</span>
+          <select id="is-fighters" class="sel">
+            <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+          </select>
+        </div>
+        <div class="row"><span class="k">Motherships</span>
+          <select id="is-motherships" class="sel">
+            <option selected>1</option><option>2</option>
+          </select>
+        </div>
+        <div class="row">
+          <span class="k"></span>
+          <button id="invasion-toggle" class="mp-toggle">Start Invasion</button>
+        </div>
+      </div>
     </div>
   </div>
 
