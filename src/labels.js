@@ -12,6 +12,14 @@ export class Labels {
     this.entries = [];   // active label data { body, el }
     this._v = new THREE.Vector3();
     this.onClick = onClick || (() => {});
+
+    // Lock-on state
+    this.lockedIdx = -1;
+    this.lockTimer = 0;
+    this.lastIdx = -1;
+    this.LOCK_TIME = 3.0; // seconds to lock
+    this.LOCK_RADIUS = 32; // px from center
+    this.eta = null;
   }
 
   setBodies(bodies) {
@@ -50,6 +58,7 @@ export class Labels {
   update(camera, w, h) {
     const cx = w * 0.5, cy = h * 0.5;
     const margin = 28; // px from screen edge for clamped labels
+    let closestIdx = -1, closestDist = 1e9, closestScreen = null;
     for (const { body, el } of this.entries) {
       body.mesh.getWorldPosition(this._v);
       const dist = this._v.distanceTo(camera.position);
@@ -74,6 +83,14 @@ export class Labels {
       if (onScreen) {
         sx = ( nx * cx) + cx;
         sy = (-ny * cy) + cy;
+        // Check for lock-on: is this label near the screen center?
+        const dx = sx - cx, dy = sy - cy;
+        const d2 = dx*dx + dy*dy;
+        if (d2 < this.LOCK_RADIUS * this.LOCK_RADIUS && d2 < closestDist) {
+          closestIdx = this.entries.indexOf({ body, el });
+          closestDist = d2;
+          closestScreen = { sx, sy, body, el };
+        }
       } else {
         // Compute a screen-space direction from center toward the body.
         // For points behind the camera, the projected NDC is mirrored — flip it
@@ -110,6 +127,44 @@ export class Labels {
       el.classList.toggle('clamped', clamped);
       const alpha = clamped ? 0.55 : Math.max(0.25, Math.min(1, 1 - Math.log10(1 + dist) * 0.04));
       el.style.opacity = String(alpha);
+      // Remove lock-on box/eta if not locked
+      el.classList.remove('locked');
+      const etaEl = el.querySelector('.eta');
+      if (etaEl) etaEl.remove();
+    }
+
+    // Lock-on logic: if a label is under the crosshair, increment timer; else reset
+    if (closestIdx !== -1) {
+      if (this.lastIdx === closestIdx) {
+        this.lockTimer += 1/60; // assume ~60fps, or use dt if available
+      } else {
+        this.lockTimer = 0;
+        this.lastIdx = closestIdx;
+      }
+      if (this.lockTimer > this.LOCK_TIME) {
+        this.lockedIdx = closestIdx;
+      }
+    } else {
+      this.lockTimer = 0;
+      this.lastIdx = -1;
+      this.lockedIdx = -1;
+    }
+
+    // Animate box and show ETA if locked
+    if (this.lockedIdx !== -1) {
+      const entry = this.entries[this.lockedIdx];
+      const el = entry.el;
+      el.classList.add('locked');
+      // ETA: needs to be set from outside (main.js) since only it knows ship velocity
+      if (this.eta !== null) {
+        let etaEl = el.querySelector('.eta');
+        if (!etaEl) {
+          etaEl = document.createElement('div');
+          etaEl.className = 'eta';
+          el.appendChild(etaEl);
+        }
+        etaEl.textContent = this.eta;
+      }
     }
   }
 }

@@ -334,6 +334,39 @@ function frame(now) {
 
   renderer.render(tier.scene, camera);
   labels.update(camera, window.innerWidth, window.innerHeight);
+    // Lock-on ETA logic: if a label is locked, compute time to arrival
+    if (labels.lockedIdx !== -1) {
+      const entry = labels.entries[labels.lockedIdx];
+      const planetPos = new THREE.Vector3();
+      entry.body.mesh.getWorldPosition(planetPos);
+      const shipPos = scales.shipWorldPos;
+      const toPlanet = new THREE.Vector3().subVectors(planetPos, shipPos);
+      const dist = toPlanet.length();
+      // Project ship velocity onto approach vector
+      const v = ship.velocity.clone();
+      const speed = v.length();
+      let etaStr = '';
+      if (speed > 1e-3) {
+        const approach = v.dot(toPlanet.normalize());
+        if (approach > 1e-3) {
+          const etaSec = dist / (approach * scales.active.units.metersPerUnit); // dist in units, speed in units/sec
+          if (etaSec < 1e6) {
+            const min = Math.floor(etaSec / 60);
+            const sec = Math.floor(etaSec % 60);
+            etaStr = `Arrival: ${min > 0 ? min + 'm ' : ''}${sec}s`;
+          } else {
+            etaStr = 'Arrival: —';
+          }
+        } else {
+          etaStr = 'Arrival: —';
+        }
+      } else {
+        etaStr = 'Arrival: —';
+      }
+      labels.eta = etaStr;
+    } else {
+      labels.eta = null;
+    }
   updatePeerGhosts();
   watchTierForInvasion();
   updateInvasion(dt, input);

@@ -155,6 +155,40 @@ html, body {
   color: #ffe5a0;
 }
 
+.label.locked {
+  box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80;
+  border: 2px solid #7ad7ff;
+  background: rgba(122, 215, 255, 0.10);
+  animation: lockon-box-draw 0.5s cubic-bezier(.4,2,.6,1) 1;
+  position: relative;
+  z-index: 10;
+}
+.label.locked .txt {
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 0.09em;
+}
+.label .eta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #ffd57a;
+  background: rgba(0,0,0,0.25);
+  border-radius: 3px;
+  padding: 1px 6px;
+  text-align: center;
+  animation: eta-fadein 0.4s cubic-bezier(.4,2,.6,1) 1;
+}
+@keyframes lockon-box-draw {
+  0%   { box-shadow: 0 0 0 0 #7ad7ff, 0 0 0 0 #7ad7ff00; border-color: #7ad7ff00; }
+  60%  { box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80; border-color: #7ad7ff; }
+  100% { box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80; border-color: #7ad7ff; }
+}
+@keyframes eta-fadein {
+  0%   { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
 #fade {
   position: fixed;
   inset: 0;
