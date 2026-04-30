@@ -14,12 +14,15 @@ function randomCode() {
 }
 
 // Clean snapshot of our local ship state to send over the wire.
-function snapshot(localId, name, tier, ship, config, isFollower) {
+function snapshot(localId, name, tier, ship, config, isFollower, dogfight, alive, fires) {
   return {
     id: localId,
     name,
     tier,
     follow: !!isFollower,
+    dogfight: !!dogfight,
+    alive: alive !== false,
+    fires: fires && fires.length ? fires : undefined,
     config,
     pos: [ship.shipWorldPos.x, ship.shipWorldPos.y, ship.shipWorldPos.z],
     quat: [ship.quat.x, ship.quat.y, ship.quat.z, ship.quat.w],
@@ -39,12 +42,18 @@ export class Net {
     this.peer = null;              // PeerJS Peer
     this.connsById = new Map();    // peerId -> DataConnection
     this.peers = new Map();        // peerId -> last snapshot
+    this.hostId = null;            // joiner: id of the host's ship snapshot
 
     // Host-only: ordered list of followers (by join time) for the line formation.
     this.followers = [];
 
     // Local ship reference + metadata (set by attach()).
     this.local = null;             // { ship, getShipWorldPos, getTier, getConfig, getName }
+
+    // Local-only flags toggled at runtime by the in-game UI.
+    this.dogfight = false;
+    this.alive = true;
+    this._pendingFires = [];       // outgoing fire events queued for next tick
 
     // Callbacks the rest of the app can hook into.
     this.onPeerJoin   = () => {};
@@ -120,8 +129,7 @@ export class Net {
   join(code, follow) {
     this.mode = 'join';
     this.code = code.toUpperCase();
-    this.followingHost = !!follow;
-    return new Promise((resolve, reject) => {
+    this.followingHost = !!follow;    return new Promise((resolve, reject) => {
       this.peer = new window.Peer({ debug: 0 });
       this.peer.on('open', (id) => {
         this.localId = id;
@@ -135,6 +143,7 @@ export class Net {
         });
         conn.on('data', (msg) => {
           if (msg.type === 'roster') {
+            this.hostId = msg.hostId || this.hostId;
             // Host pushed the full roster + tier + (optional) follower-target pose.
             for (const snap of msg.snaps) {
               if (snap.id === this.localId) continue;
@@ -179,6 +188,8 @@ export class Net {
 
   _tick() {
     if (!this.local) return;
+    const fires = this._pendingFires;
+    this._pendingFires = [];
     const snap = snapshot(
       this.localId,
       this.localName,
@@ -186,6 +197,9 @@ export class Net {
       { shipWorldPos: this.local.getShipWorldPos(), quat: this.local.ship.quat, visualUnits: this.local.ship.visualUnits },
       this.local.getConfig(),
       this.followingHost,
+      this.dogfight,
+      this.alive,
+      fires,
     );
 
     if (this.mode === 'host') {
@@ -224,6 +238,7 @@ export class Net {
           conn.send({
             type: 'roster',
             snaps,
+            hostId: this.localId,
             hostTier: snap.tier,
             followPose,
           });
@@ -244,6 +259,30 @@ export class Net {
     this.peer = null;
     this.connsById.clear();
     this.peers.clear();
+  }
+
+  // ---- Runtime toggles, callable from the in-game UI ----
+  setFollowingHost(on) {
+    if (this.mode !== 'join') return;
+    this.followingHost = !!on;
+  }
+
+  setDogfight(on) {
+    this.dogfight = !!on;
+  }
+
+  setAlive(on) {
+    this.alive = !!on;
+  }
+
+  // Queue a fire event to be sent on the next tick.
+  queueFire(pos, dir, speed) {
+    this._pendingFires.push({
+      pos: [pos.x, pos.y, pos.z],
+      dir: [dir.x, dir.y, dir.z],
+      speed,
+      t: performance.now(),
+    });
   }
 }
 

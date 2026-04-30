@@ -31,10 +31,6 @@
         <input id="join-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" />
         <button id="btn-join" class="lobby-btn">Join Room</button>
       </div>
-      <label class="lobby-checkbox">
-        <input id="join-follow" type="checkbox" />
-        <span>Follow the host (auto-pilot — no controls)</span>
-      </label>
 
       <div class="lobby-divider">— or —</div>
       <button id="btn-host" class="lobby-btn">Host a Room</button>
@@ -50,6 +46,8 @@
     <span id="mp-role">—</span>
     <span class="sep">·</span>
     <span id="mp-peers">0 connected</span>
+    <button id="mp-toggle-follow" class="mp-toggle hidden" title="Follow the host in formation">Follow Host: OFF</button>
+    <button id="mp-toggle-dogfight" class="mp-toggle hidden" title="Equip machine gun (Solar system only). Press F to fire.">Dogfight: OFF</button>
   </div>
 
   <div id="hud">
@@ -105,6 +103,7 @@
       <tr><td><b>Drag</b></td><td>Look around</td></tr>
       <tr><td><b>Scroll</b></td><td>Zoom in / out</td></tr>
       <tr><td><b>R</b></td><td>Reset orientation</td></tr>
+      <tr><td><b>F</b></td><td>Fire (dogfight mode)</td></tr>
       <tr><td><b>H</b></td><td>Toggle help</td></tr>
     </table>
     <p class="hint">Click anywhere to begin.</p>

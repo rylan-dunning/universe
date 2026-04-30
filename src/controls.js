@@ -61,6 +61,7 @@ export class Controls {
       shipScaleDelta: this.shipScaleDelta,
       resetOrient: this.resetOrient,
       toggleHelp: this.toggleHelp,
+      fire: k.has('f'),
     };
     // Clear one-shot flags
     this.fullStop = false;

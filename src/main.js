@@ -335,6 +335,8 @@ function frame(now) {
   renderer.render(tier.scene, camera);
   labels.update(camera, window.innerWidth, window.innerHeight);
   updatePeerGhosts();
+  watchTierForDogfight();
+  updateDogfight(dt, input);
   requestAnimationFrame(frame);
 }
 
@@ -666,10 +668,24 @@ const localName = 'Pilot-' + Math.floor(Math.random() * 9999);
 const peerGhosts = new Map();
 const peersRoot = document.getElementById('labels-root');
 
-function makePeerLabel(name) {
+function makePeerLabel(name, peerId) {
   const el = document.createElement('div');
   el.className = 'peer-label';
-  el.textContent = name;
+  const dot = document.createElement('span');
+  dot.className = 'pdot';
+  const txt = document.createElement('span');
+  txt.className = 'ptxt';
+  txt.textContent = name;
+  el.appendChild(dot);
+  el.appendChild(txt);
+  // Click handler: clicking the host's tag (when we're a joiner) toggles follow.
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation());
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    if (net.mode === 'join' && peerId === net.hostId) {
+      setFollowingHost(!net.followingHost);
+    }
+  });
   peersRoot.appendChild(el);
   return el;
 }
@@ -679,7 +695,13 @@ function ensureGhost(snap) {
   if (!g) {
     const ghostShip = new Ship();
     ghostShip.setConfig(snap.config || {});
-    g = { ship: ghostShip, label: makePeerLabel(snap.name || snap.id), tier: -1, lastSnap: snap };
+    g = {
+      ship: ghostShip,
+      label: makePeerLabel(snap.name || snap.id, snap.id),
+      tier: -1,
+      lastSnap: snap,
+      prevAlive: snap.alive !== false,
+    };
     peerGhosts.set(snap.id, g);
   }
   // Move ghost to current tier's scene if needed.
@@ -706,10 +728,32 @@ function removeGhost(id) {
 // Hook net callbacks.
 net.onPeerUpdate = (id, snap) => {
   const g = ensureGhost(snap);
+  // Detect alive transitions for explosion VFX.
+  const wasAlive = g.prevAlive !== false;
+  const isAlive = snap.alive !== false;
+  if (wasAlive && !isAlive) {
+    // Peer just died — spawn an explosion at their last known position.
+    if (snap.tier === scales.activeIndex) {
+      spawnExplosion(snap.pos[0], snap.pos[1], snap.pos[2]);
+    }
+  }
+  g.prevAlive = isAlive;
   g.lastSnap = snap;
   // Apply config changes if the peer reskinned.
   if (snap.config && JSON.stringify(snap.config) !== JSON.stringify(g.ship.config)) {
     g.ship.setConfig(snap.config);
+  }
+  // Spawn any bullet events the peer fired this tick.
+  // Per spec: players without dogfight mode don't see other players' bullets.
+  if (snap.fires && net.dogfight && snap.tier === scales.activeIndex && scales.activeIndex === 0) {
+    for (const f of snap.fires) {
+      spawnBullet(
+        snap.id,
+        new THREE.Vector3(f.pos[0], f.pos[1], f.pos[2]),
+        new THREE.Vector3(f.dir[0], f.dir[1], f.dir[2]),
+        f.speed,
+      );
+    }
   }
 };
 net.onPeerLeave = (id) => { removeGhost(id); };
@@ -726,7 +770,9 @@ net.onStatus = (m) => { /* could surface in UI */ };
 // Per-frame: position / orient each ghost in our tier.
 function updatePeerGhosts() {
   const tier = scales.active;
-  const sp = scales.shipWorldPos;
+  const w = window.innerWidth, h = window.innerHeight;
+  const cx = w * 0.5, cy = h * 0.5;
+  const margin = 28;
   for (const [id, g] of peerGhosts) {
     const s = g.lastSnap;
     if (!s || s.tier !== scales.activeIndex) {
@@ -739,6 +785,8 @@ function updatePeerGhosts() {
       tier.scene.add(g.ship.group);
       g.tier = scales.activeIndex;
     }
+    // Hide the ship mesh while the peer is "dead" (between hit & respawn).
+    g.ship.group.visible = s.alive !== false;
     // World position - floating-origin offset (i.e., draw at peer.pos in scene).
     g.ship.group.position.set(s.pos[0], s.pos[1], s.pos[2]);
     g.ship.group.quaternion.set(s.quat[0], s.quat[1], s.quat[2], s.quat[3]);
@@ -746,15 +794,42 @@ function updatePeerGhosts() {
     const visual = Math.max(s.vis || 0, scales.minShipDisplayUnits[scales.activeIndex]);
     g.ship.group.scale.setScalar(visual / 2.0);
 
-    // Project to screen for label.
-    const v = g.ship.group.position.clone().project(camera);
-    if (v.z >= 1 || v.z <= -1) {
-      g.label.style.transform = 'translate(-9999px, -9999px)';
+    // Tag styling: highlight host, color dogfighters red.
+    g.label.classList.toggle('host', id === net.hostId);
+    g.label.classList.toggle('dogfight', !!s.dogfight);
+
+    // Project to screen (with off-screen clamping so peer tags stay visible).
+    const wp = g.ship.group.position;
+    const vx = wp.x - camera.position.x;
+    const vy = wp.y - camera.position.y;
+    const vz = wp.z - camera.position.z;
+    const fwdX = -camera.matrixWorld.elements[8];
+    const fwdY = -camera.matrixWorld.elements[9];
+    const fwdZ = -camera.matrixWorld.elements[10];
+    const inFront = (vx * fwdX + vy * fwdY + vz * fwdZ) > 0;
+
+    const v = wp.clone().project(camera);
+    let nx = v.x, ny = v.y;
+    const onScreen = inFront && nx > -1 && nx < 1 && ny > -1 && ny < 1;
+
+    let sx, sy, clamped = false;
+    if (onScreen) {
+      sx = nx * cx + cx;
+      sy = -ny * cy + cy;
     } else {
-      const x = (v.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-v.y * 0.5 + 0.5) * window.innerHeight + 14;
-      g.label.style.transform = `translate(${x}px, ${y}px)`;
+      if (!inFront) { nx = -nx; ny = -ny; }
+      if (Math.abs(nx) < 1e-6 && Math.abs(ny) < 1e-6) { nx = 0; ny = 1; }
+      const maxX = (w - 2 * margin) * 0.5;
+      const maxY = (h - 2 * margin) * 0.5;
+      const sxScale = Math.abs(nx) > 1e-9 ? maxX / Math.abs(nx) : Infinity;
+      const syScale = Math.abs(ny) > 1e-9 ? maxY / Math.abs(ny) : Infinity;
+      const sScale = Math.min(sxScale, syScale);
+      sx = cx + nx * sScale;
+      sy = cy - ny * sScale;
+      clamped = true;
     }
+    g.label.classList.toggle('clamped', clamped);
+    g.label.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -50%)`;
   }
 }
 
@@ -785,6 +860,15 @@ function showMpStatus(role, code) {
   mpStatus.classList.remove('hidden');
   document.getElementById('mp-code').textContent = code;
   document.getElementById('mp-role').textContent = role;
+  // Joiners get the in-game "follow host" toggle.
+  const followBtn = document.getElementById('mp-toggle-follow');
+  if (net.mode === 'join') followBtn.classList.remove('hidden');
+  else followBtn.classList.add('hidden');
+  // Anyone in a multiplayer room can use dogfight (gated to Solar at use time).
+  const dfBtn = document.getElementById('mp-toggle-dogfight');
+  if (net.mode === 'host' || net.mode === 'join') dfBtn.classList.remove('hidden');
+  else dfBtn.classList.add('hidden');
+  refreshDogfightAvailability();
 }
 function refreshPeerCount() {
   document.getElementById('mp-peers').textContent = `${peerGhosts.size + 1} connected`;
@@ -830,12 +914,11 @@ document.getElementById('btn-host').addEventListener('click', async () => {
 document.getElementById('btn-join').addEventListener('click', async () => {
   const code = document.getElementById('join-code').value.trim().toUpperCase();
   if (code.length !== 4) { lobbyError('Code must be 4 characters'); return; }
-  const follow = document.getElementById('join-follow').checked;
   lobbyInfo(`Connecting to ${code}…`);
   try {
-    await net.join(code, follow);
-    lobbyInfo(follow ? 'Connected — auto-following host.' : 'Connected.');
-    showMpStatus(follow ? 'Follower' : 'Joined', code);
+    await net.join(code, false);
+    lobbyInfo('Connected.');
+    showMpStatus('Joined', code);
     setTimeout(leaveLobby, 1000);
   } catch (e) {
     lobbyError('Could not connect: ' + (e?.message || e));
@@ -846,3 +929,221 @@ document.getElementById('join-code').addEventListener('input', (e) => {
   e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
 });
 
+// ---------------------------------------------------------------------------
+// In-game multiplayer toggles: Follow Host (joiner only) + Dogfight Mode.
+// ---------------------------------------------------------------------------
+const followBtn = document.getElementById('mp-toggle-follow');
+const dogfightBtn = document.getElementById('mp-toggle-dogfight');
+
+function setFollowingHost(on) {
+  if (net.mode !== 'join') return;
+  net.setFollowingHost(on);
+  followBtn.textContent = `Follow Host: ${on ? 'ON' : 'OFF'}`;
+  followBtn.classList.toggle('on', on);
+  // Turning OFF: leave ship right where the host parked us — clear any
+  // residual motion so the player doesn't drift away unexpectedly.
+  if (!on) ship.resetMotion();
+}
+followBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setFollowingHost(!net.followingHost);
+});
+
+function refreshDogfightAvailability() {
+  // Dogfight only allowed in the Solar system (tier 0). Disable button + force
+  // off in other tiers so you can't carry a machine gun into the galaxy view.
+  const ok = scales.activeIndex === 0;
+  dogfightBtn.classList.toggle('disabled', !ok);
+  dogfightBtn.title = ok
+    ? 'Equip machine gun. Press F to fire.'
+    : 'Dogfight is only available in the Solar system.';
+  if (!ok && net.dogfight) setDogfight(false);
+}
+function setDogfight(on) {
+  if (on && scales.activeIndex !== 0) return;
+  net.setDogfight(on);
+  dogfightBtn.textContent = `Dogfight: ${on ? 'ON' : 'OFF'}`;
+  dogfightBtn.classList.toggle('on', on);
+  // Toggling off: clear any in-flight bullets from view (you can no longer
+  // see or be hit by them).
+  if (!on) clearBullets();
+}
+dogfightBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (dogfightBtn.classList.contains('disabled')) return;
+  setDogfight(!net.dogfight);
+});
+
+// ---------------------------------------------------------------------------
+// Dogfight mode: bullets, hit detection, explosion, respawn.
+// All bullets live in *world* (tier-unit) space; rendered relative to the
+// floating-origin scene each frame.
+// ---------------------------------------------------------------------------
+const bullets = [];                  // { ownerId, pos, dir, speed, ttl, mesh }
+const explosions = [];               // { mesh, ttl, life }
+let lastFireTime = 0;
+const FIRE_COOLDOWN = 0.08;          // seconds between local shots (~12/s)
+let deadUntil = 0;                   // performance.now() in ms; we're "dead" until then
+const RESPAWN_DELAY_MS = 1500;
+
+function bulletSpeed() {
+  // Comfortably faster than ship boost so shots actually hit.
+  return scales.currentMaxSpeed * 1.2;
+}
+function bulletTTL() {
+  // Range = speed * ttl. 1.0s gives a generous reach without choking the scene.
+  return 1.0;
+}
+function bulletVisualSize() {
+  // Make bullets readable at any ship scale.
+  return Math.max(ship.visualUnits * 0.25, 0.02);
+}
+
+function spawnBullet(ownerId, posWorld, dir, speed) {
+  if (scales.activeIndex !== 0) return;  // dogfight is solar-only
+  const mat = new THREE.MeshBasicMaterial({ color: ownerId === net.localId ? 0xfff05c : 0xff7a7a });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 6, 6), mat);
+  mesh.scale.setScalar(bulletVisualSize());
+  scales.active.scene.add(mesh);
+  bullets.push({
+    ownerId,
+    pos: posWorld.clone(),
+    dir: dir.clone().normalize(),
+    speed,
+    ttl: bulletTTL(),
+    mesh,
+  });
+}
+
+function spawnExplosion(wx, wy, wz) {
+  if (scales.activeIndex !== 0) return;
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffae3a, transparent: true, opacity: 0.9,
+  });
+  const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), mat);
+  mesh.position.set(wx, wy, wz);
+  scales.active.scene.add(mesh);
+  const life = 0.7;
+  explosions.push({ mesh, ttl: life, life, base: Math.max(ship.visualUnits * 2, 0.5) });
+}
+
+function clearBullets() {
+  for (const b of bullets) {
+    if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
+    b.mesh.geometry.dispose(); b.mesh.material.dispose();
+  }
+  bullets.length = 0;
+}
+
+function fireBullet() {
+  if (scales.activeIndex !== 0) return;
+  if (!net.dogfight) return;
+  if (performance.now() < deadUntil) return;
+  const now = performance.now() / 1000;
+  if (now - lastFireTime < FIRE_COOLDOWN) return;
+  lastFireTime = now;
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
+  // Spawn just ahead of the nose so we don't shoot ourselves.
+  const offset = ship.visualUnits * 1.2;
+  const pos = scales.shipWorldPos.clone().addScaledVector(forward, offset);
+  const speed = bulletSpeed();
+  spawnBullet(net.localId, pos, forward, speed);
+  // Tell other clients via next snapshot.
+  if (net.mode !== 'solo') net.queueFire(pos, forward, speed);
+}
+
+function explodeLocal() {
+  if (performance.now() < deadUntil) return;
+  spawnExplosion(scales.shipWorldPos.x, scales.shipWorldPos.y, scales.shipWorldPos.z);
+  deadUntil = performance.now() + RESPAWN_DELAY_MS;
+  net.setAlive(false);
+  ship.resetMotion();
+  ship.group.visible = false;
+}
+function maybeRespawn() {
+  if (deadUntil === 0) return;
+  if (performance.now() < deadUntil) return;
+  deadUntil = 0;
+  // Restart at the solar spawn.
+  scales.shipWorldPos.copy(scales.active.spawn);
+  ship.resetMotion();
+  ship.resetOrientation();
+  ship.group.visible = true;
+  net.setAlive(true);
+  controls.throttle = 0;
+}
+
+function updateDogfight(dt, input) {
+  // Force dogfight off when not in solar (defensive — toggle button also gates).
+  if (scales.activeIndex !== 0 && net.dogfight) setDogfight(false);
+
+  // Fire while F is held (rate-limited).
+  if (input.fire) fireBullet();
+  maybeRespawn();
+
+  // Integrate bullets in world space.
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.pos.addScaledVector(b.dir, b.speed * dt);
+    b.ttl -= dt;
+    // Bullets live in scene-local coords (= world coords). The scene root is
+    // already translated by -shipWorldPos every frame, so just copy b.pos.
+    b.mesh.position.copy(b.pos);
+    // Hit-test: only against US, only if we have dogfight enabled & alive,
+    // and only for bullets we didn't fire.
+    if (b.ownerId !== net.localId && net.dogfight && net.alive && performance.now() >= deadUntil) {
+      const dx = b.pos.x - scales.shipWorldPos.x;
+      const dy = b.pos.y - scales.shipWorldPos.y;
+      const dz = b.pos.z - scales.shipWorldPos.z;
+      const hitR = Math.max(ship.visualUnits * 1.5, 0.1);
+      if (dx * dx + dy * dy + dz * dz < hitR * hitR) {
+        scales.active.scene.remove(b.mesh);
+        b.mesh.geometry.dispose(); b.mesh.material.dispose();
+        bullets.splice(i, 1);
+        explodeLocal();
+        continue;
+      }
+    }
+    if (b.ttl <= 0) {
+      scales.active.scene.remove(b.mesh);
+      b.mesh.geometry.dispose(); b.mesh.material.dispose();
+      bullets.splice(i, 1);
+    }
+  }
+
+  // Animate explosions: expand and fade.
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const e = explosions[i];
+    e.ttl -= dt;
+    const u = 1 - Math.max(0, e.ttl) / e.life;
+    e.mesh.scale.setScalar(e.base * (0.4 + u * 2.5));
+    e.mesh.material.opacity = Math.max(0, 1 - u);
+    // Keep position synced with floating origin (use world coords stored at spawn).
+    if (e.ttl <= 0) {
+      scales.active.scene.remove(e.mesh);
+      e.mesh.geometry.dispose(); e.mesh.material.dispose();
+      explosions.splice(i, 1);
+    }
+  }
+}
+
+// On tier change, the dogfight toggle availability changes too. We hook into
+// the existing transition logic by polling each frame in the main loop.
+let _lastTier = -1;
+function watchTierForDogfight() {
+  if (scales.activeIndex !== _lastTier) {
+    _lastTier = scales.activeIndex;
+    refreshDogfightAvailability();
+    // Bullets/explosions belong to the previous tier's scene — clear them.
+    for (const b of bullets) {
+      if (b.mesh.parent) b.mesh.parent.remove(b.mesh);
+      b.mesh.geometry.dispose(); b.mesh.material.dispose();
+    }
+    bullets.length = 0;
+    for (const e of explosions) {
+      if (e.mesh.parent) e.mesh.parent.remove(e.mesh);
+      e.mesh.geometry.dispose(); e.mesh.material.dispose();
+    }
+    explosions.length = 0;
+  }
+}
