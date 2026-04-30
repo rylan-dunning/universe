@@ -871,10 +871,23 @@ const infoToggle = document.getElementById('info-toggle');
 
 function bindPanelToggle(panelEl, toggleEl) {
   if (!panelEl || !toggleEl) return;
-  toggleEl.addEventListener('click', (e) => {
+  // CSS drives the arrow icon via ::before, so clear any text content.
+  toggleEl.textContent = '';
+  const handler = (e) => {
+    e.preventDefault();
     e.stopPropagation();
     panelEl.classList.toggle('collapsed');
-    toggleEl.textContent = panelEl.classList.contains('collapsed') ? '+' : '−';
+  };
+  // Use pointerdown for snappy touch response, but keep click as a fallback
+  // for keyboard activation. Guard against double-firing.
+  let lastPointer = 0;
+  toggleEl.addEventListener('pointerdown', (e) => {
+    lastPointer = performance.now();
+    handler(e);
+  });
+  toggleEl.addEventListener('click', (e) => {
+    if (performance.now() - lastPointer < 600) { e.preventDefault(); e.stopPropagation(); return; }
+    handler(e);
   });
 }
 

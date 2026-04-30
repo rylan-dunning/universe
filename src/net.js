@@ -5,40 +5,13 @@
 const ROOM_PREFIX = 'cosmoscope-';
 const TICK_HZ = 12;                 // state broadcasts per second
 const FOLLOW_SPACING = 12;          // ship-lengths between followers in line
-const JOIN_TIMEOUT_MS = 15000;
+const JOIN_TIMEOUT_MS = 20000;
 const MAX_HOST_CODE_ATTEMPTS = 6;
 
-const PEER_OPTIONS = {
-  host: '0.peerjs.com',
-  port: 443,
-  path: '/',
-  secure: true,
-  debug: 1,
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      { urls: 'stun:openrelay.metered.ca:80' },
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-    ],
-    sdpSemantics: 'unified-plan',
-  },
-};
+// Use PeerJS defaults (cloud broker + Google STUN). Adding custom TURN
+// (e.g. openrelay) caused ICE gathering to hang and joins to time out.
+// debug:2 prints warnings + errors to console for diagnosis.
+const PEER_OPTIONS = { debug: 2 };
 
 function randomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -249,7 +222,7 @@ export class Net {
       this.peer.on('open', (id) => {
         this.localId = id;
         conn = this.peer.connect(ROOM_PREFIX + this.code, {
-          reliable: false,
+          reliable: true,
           serialization: 'json',
           metadata: { version: 1 },
         });

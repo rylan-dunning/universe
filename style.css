@@ -45,30 +45,78 @@ html, body {
   pointer-events: none;
 }
 
-#hud .panel-header {
-  display: none;
+#hud .panel-header,
+#info .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  pointer-events: auto;
 }
 
 .panel-toggle {
-  display: none;
-  width: 22px;
-  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   padding: 0;
+  margin: -4px -6px -4px 0;   /* hug the right edge of the panel */
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--dim);
-  font: inherit;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
   pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  transition: color 120ms, border-color 120ms, background 120ms;
 }
 
 .panel-toggle:hover,
 .panel-toggle:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
+  background: rgba(110, 231, 255, 0.08);
   outline: none;
+}
+
+.panel-toggle::before {
+  content: "\2039"; /* ‹  expanded → click to collapse left */
+  font-weight: 700;
+  display: block;
+  line-height: 1;
+}
+
+#hud.collapsed .panel-toggle::before,
+#info.collapsed .panel-toggle::before {
+  content: "\203A"; /* ›  collapsed → click to expand right */
+}
+
+#hud.collapsed .panel-body,
+#info.collapsed .panel-body {
+  display: none;
+}
+
+#hud.collapsed .panel-header,
+#info.collapsed .panel-header {
+  margin-bottom: 0;
+}
+
+#hud.collapsed .title,
+#info.collapsed .title {
+  display: none;
+}
+
+#hud.collapsed,
+#info.collapsed {
+  min-width: 0;
+  width: auto;
+  padding: 6px 8px;
 }
 
 #hud .row {
@@ -167,15 +215,8 @@ html, body {
   pointer-events: none;
 }
 
-#info .panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 4px;
-}
-
-#info .title {
+#info .title,
+#hud .title {
   color: var(--accent);
   letter-spacing: 0.08em;
   font-size: 11px;
@@ -703,36 +744,16 @@ html, body {
     pointer-events: auto;
   }
 
-  #hud .panel-header,
-  #info .panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 4px;
-    pointer-events: auto;
-  }
-
   #hud .title,
   #info .title {
     margin: 0;
   }
 
   .panel-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  #hud.collapsed .panel-body,
-  #info.collapsed .panel-body {
-    display: none;
-  }
-
-  #hud.collapsed,
-  #info.collapsed {
-    width: auto;
-    min-width: 132px;
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+    margin: -4px -8px -4px 0;
   }
 
   #hud .row,
