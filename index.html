@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Cosmoscope — Explore the Universe to Scale</title>
 <link rel="stylesheet" href="style.css" />
 <script type="importmap">
@@ -180,6 +180,25 @@
           <button id="invasion-toggle" class="mp-toggle">Start Invasion</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="mobile-controls" aria-label="Touch flight controls">
+    <div class="touch-pad left">
+      <button class="touch-btn up" data-touch-hold="throttleUp">Throttle +</button>
+      <button class="touch-btn left" data-touch-hold="yawLeft">Yaw R</button>
+      <button class="touch-btn center" data-touch-action="fullStop">Stop</button>
+      <button class="touch-btn right" data-touch-hold="yawRight">Yaw L</button>
+      <button class="touch-btn down" data-touch-hold="throttleDown">Throttle −</button>
+    </div>
+    <div class="touch-pad right">
+      <button class="touch-btn up" data-touch-hold="pitchUp">Pitch ↑</button>
+      <button class="touch-btn left" data-touch-hold="rollLeft">Roll L</button>
+      <button class="touch-btn center accent" data-touch-hold="fire">Fire</button>
+      <button class="touch-btn right" data-touch-hold="rollRight">Roll R</button>
+      <button class="touch-btn down" data-touch-hold="pitchDown">Pitch ↓</button>
+      <button class="touch-chip boost" data-touch-hold="boost">Boost</button>
+      <button class="touch-chip brake" data-touch-hold="brake">Brake</button>
     </div>
   </div>
 

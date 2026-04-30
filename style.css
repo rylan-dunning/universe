@@ -19,6 +19,7 @@ html, body {
   overflow: hidden;
   -webkit-user-select: none;
   user-select: none;
+  overscroll-behavior: none;
 }
 
 #view {
@@ -28,6 +29,7 @@ html, body {
   width: 100vw;
   height: 100vh;
   cursor: crosshair;
+  touch-action: none;
 }
 
 #hud {
@@ -411,6 +413,16 @@ html, body {
   min-height: 16px;
 }
 
+#mobile-controls {
+  display: none;
+}
+
+.touch-pad,
+.touch-chip,
+.touch-btn {
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* ---- Settings (ship customization) ---- */
 #settings-btn {
   position: fixed;
@@ -629,6 +641,201 @@ html, body {
   background: var(--accent);
   color: #021018;
   border-color: var(--accent);
+}
+
+@media (pointer: coarse), (max-width: 900px) {
+  #search {
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  #hud,
+  #info,
+  #speed-popover,
+  #card,
+  #help,
+  #settings,
+  #minimap {
+    max-width: calc(100vw - 24px);
+  }
+
+  #hud {
+    min-width: 0;
+    width: calc(100vw - 24px);
+    padding: 8px 10px;
+  }
+
+  #hud .row,
+  #info .row,
+  #speed-popover .row {
+    gap: 10px;
+  }
+
+  #speed-popover {
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 188px);
+    left: 12px;
+    right: 12px;
+    min-width: 0;
+    max-width: none;
+  }
+
+  #info {
+    top: 178px;
+    width: calc(100vw - 24px);
+    min-width: 0;
+  }
+
+  #help {
+    left: auto;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    max-width: min(280px, calc(100vw - 24px));
+  }
+
+  #help table {
+    font-size: 11px;
+  }
+
+  #card {
+    top: 56px;
+    min-width: 0;
+    width: calc(100vw - 24px);
+  }
+
+  #minimap {
+    width: 144px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 138px);
+  }
+
+  #minimap.raised {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 452px);
+  }
+
+  #minimap-canvas {
+    width: 124px;
+    height: 124px;
+  }
+
+  #settings-btn {
+    width: 46px;
+    height: 46px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+  }
+
+  #settings {
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 138px);
+    width: auto;
+  }
+
+  #scale-bar {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    width: calc(100vw - 24px);
+    justify-content: center;
+  }
+
+  .scale-btn {
+    flex: 1;
+    padding: 10px 8px;
+    font-size: 10px;
+  }
+
+  #mobile-controls {
+    position: fixed;
+    inset: auto 12px calc(env(safe-area-inset-bottom, 0px) + 14px) 12px;
+    display: block;
+    pointer-events: none;
+    z-index: 7;
+  }
+
+  .touch-pad {
+    position: absolute;
+    width: 144px;
+    height: 144px;
+    pointer-events: auto;
+  }
+
+  .touch-pad.left {
+    left: 0;
+    bottom: 0;
+  }
+
+  .touch-pad.right {
+    right: 0;
+    bottom: 0;
+  }
+
+  .touch-btn,
+  .touch-chip {
+    position: absolute;
+    border: 1px solid rgba(122, 215, 255, 0.28);
+    background: rgba(6, 12, 24, 0.8);
+    color: var(--fg);
+    border-radius: 999px;
+    font-family: inherit;
+    font-size: 11px;
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    touch-action: manipulation;
+  }
+
+  .touch-btn {
+    width: 56px;
+    height: 56px;
+    padding: 0;
+  }
+
+  .touch-btn.up { left: 44px; top: 0; }
+  .touch-btn.left { left: 0; top: 44px; }
+  .touch-btn.center { left: 44px; top: 44px; }
+  .touch-btn.right { right: 0; top: 44px; }
+  .touch-btn.down { left: 44px; bottom: 0; }
+
+  .touch-btn.accent {
+    background: rgba(255, 90, 90, 0.2);
+    border-color: rgba(255, 120, 120, 0.5);
+  }
+
+  .touch-chip {
+    min-width: 64px;
+    height: 32px;
+    padding: 0 12px;
+    top: -38px;
+  }
+
+  .touch-chip.boost { left: 0; }
+  .touch-chip.brake { right: 0; }
+}
+
+@media (max-width: 640px) {
+  #mp-status {
+    top: 8px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    text-align: center;
+  }
+
+  #hud {
+    font-size: 12px;
+  }
+
+  #info {
+    top: 196px;
+  }
+
+  #minimap {
+    display: none;
+  }
+
+  #help {
+    max-width: 200px;
+  }
 }
 .lobby-btn.primary:hover { background: #a3e6ff; }
 .lobby-row {

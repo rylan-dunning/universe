@@ -2,6 +2,19 @@
 export class Controls {
   constructor(target = window) {
     this.keys = new Set();
+    this.touch = {
+      throttleUp: false,
+      throttleDown: false,
+      yawLeft: false,
+      yawRight: false,
+      pitchUp: false,
+      pitchDown: false,
+      rollLeft: false,
+      rollRight: false,
+      boost: false,
+      brake: false,
+      fire: false,
+    };
     this.throttle = 0;          // 0..1
     this.boost = false;
     this.brake = false;
@@ -14,6 +27,15 @@ export class Controls {
     target.addEventListener('keydown', (e) => this._down(e));
     target.addEventListener('keyup',   (e) => this._up(e));
     target.addEventListener('blur',    () => this.keys.clear());
+  }
+
+  setTouchHold(control, active) {
+    if (!(control in this.touch)) return;
+    this.touch[control] = !!active;
+  }
+
+  triggerTouchAction(action) {
+    if (action === 'fullStop') this.fullStop = true;
   }
 
   _down(e) {
@@ -38,18 +60,19 @@ export class Controls {
   // Returns axis values in [-1, 1]
   sample(dt) {
     const k = this.keys;
+    const t = this.touch;
 
     // Throttle (W/S) — sticky, like a real throttle lever.
-    if (k.has('w')) this.throttle = Math.min(1, this.throttle + dt * 0.6);
-    if (k.has('s')) this.throttle = Math.max(0, this.throttle - dt * 0.6);
+    if (k.has('w') || t.throttleUp) this.throttle = Math.min(1, this.throttle + dt * 0.6);
+    if (k.has('s') || t.throttleDown) this.throttle = Math.max(0, this.throttle - dt * 0.6);
 
     // A/D yaw (reversed: A turns right, D turns left, per user preference)
-    const yaw   = (k.has('a') ? 1 : 0) - (k.has('d') ? 1 : 0);
-    const pitch = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp')   ? 1 : 0);
-    const roll  = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
+    const yaw   = ((k.has('a') || t.yawLeft) ? 1 : 0) - ((k.has('d') || t.yawRight) ? 1 : 0);
+    const pitch = ((k.has('ArrowDown') || t.pitchDown) ? 1 : 0) - ((k.has('ArrowUp') || t.pitchUp) ? 1 : 0);
+    const roll  = ((k.has('ArrowRight') || t.rollRight) ? 1 : 0) - ((k.has('ArrowLeft') || t.rollLeft) ? 1 : 0);
 
-    this.boost = k.has('Shift');
-    this.brake = k.has('Control');
+    this.boost = k.has('Shift') || t.boost;
+    this.brake = k.has('Control') || t.brake;
 
     const out = {
       throttle: this.throttle,
@@ -61,7 +84,7 @@ export class Controls {
       shipScaleDelta: this.shipScaleDelta,
       resetOrient: this.resetOrient,
       toggleHelp: this.toggleHelp,
-      fire: k.has('f'),
+      fire: k.has('f') || t.fire,
     };
     // Clear one-shot flags
     this.fullStop = false;

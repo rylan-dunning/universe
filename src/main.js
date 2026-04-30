@@ -49,6 +49,7 @@ const minimapEl = document.getElementById('minimap');
 const minimapCanvas = document.getElementById('minimap-canvas');
 const minimapStatusEl = document.getElementById('minimap-status');
 const minimapCtx = minimapCanvas.getContext('2d');
+const mobileControlsEl = document.getElementById('mobile-controls');
 
 const SPEED_REFERENCES = {
   car: { label: 'ThrustSSC', mps: 341.1 },
@@ -157,6 +158,7 @@ let dragYaw   = 0;        // radians, around world-up
 let dragPitch = 0;        // radians, around camera-right
 let dragging  = false;
 let dragLastX = 0, dragLastY = 0;
+let dragPointerId = null;
 
 // User-controlled zoom (scroll wheel). 1 = default chase distance.
 let userZoom = 1;
@@ -212,14 +214,17 @@ function attachShipToActive() {
 
 // ---- Click to focus / hide help (but don't close the card on a drag) ----
 let _downX = 0, _downY = 0, _downT = 0;
-canvas.addEventListener('mousedown', (e) => {
+canvas.addEventListener('pointerdown', (e) => {
+  if (dragPointerId !== null) return;
+  dragPointerId = e.pointerId;
   _downX = e.clientX; _downY = e.clientY; _downT = performance.now();
   dragging = true;
   dragLastX = e.clientX;
   dragLastY = e.clientY;
+  canvas.setPointerCapture?.(e.pointerId);
 });
-canvas.addEventListener('mousemove', (e) => {
-  if (!dragging) return;
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging || e.pointerId !== dragPointerId) return;
   const dx = e.clientX - dragLastX;
   const dy = e.clientY - dragLastY;
   dragLastX = e.clientX;
@@ -242,9 +247,10 @@ canvas.addEventListener('mousemove', (e) => {
   if (dragPitch >  lim) dragPitch =  lim;
   if (dragPitch < -lim) dragPitch = -lim;
 });
-window.addEventListener('mouseup', (e) => {
-  if (!dragging) return;
+function endPointerDrag(e) {
+  if (!dragging || e.pointerId !== dragPointerId) return;
   dragging = false;
+  dragPointerId = null;
   const dx = e.clientX - _downX;
   const dy = e.clientY - _downY;
   const moved = (dx * dx + dy * dy) > 16; // > 4 px = drag, not click
@@ -253,7 +259,9 @@ window.addEventListener('mouseup', (e) => {
     closeCard();
     canvas.focus();
   }
-});
+}
+window.addEventListener('pointerup', endPointerDrag);
+window.addEventListener('pointercancel', endPointerDrag);
 
 // ---- Scroll wheel: zoom in / out ----
 // In free flight, scales the camera chase distance.
@@ -270,6 +278,29 @@ canvas.addEventListener('wheel', (e) => {
     userZoom = Math.min(50, Math.max(0.05, userZoom * factor));
   }
 }, { passive: false });
+
+for (const btn of mobileControlsEl.querySelectorAll('[data-touch-hold], [data-touch-action]')) {
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    btn.setPointerCapture?.(e.pointerId);
+    const hold = btn.dataset.touchHold;
+    const action = btn.dataset.touchAction;
+    if (hold) controls.setTouchHold(hold, true);
+    if (action) controls.triggerTouchAction(action);
+  });
+
+  const release = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const hold = btn.dataset.touchHold;
+    if (hold) controls.setTouchHold(hold, false);
+  };
+
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', release);
+}
 
 // ---- Main loop ----
 let prev = performance.now();
