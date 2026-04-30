@@ -8,13 +8,13 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "trystero": "https://esm.sh/trystero@0.21.0/torrent"
   }
 }
 </script>
-<!-- PeerJS: WebRTC peer-to-peer with a free public signaling broker.
-     Lets us run multiplayer entirely from a static GitHub Pages site. -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- Multiplayer signaling uses Trystero over BitTorrent trackers
+     (multiple redundant servers; no single broker to fail). -->
 </head>
 <body>
   <canvas id="view"></canvas>

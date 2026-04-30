@@ -71,6 +71,9 @@ export function buildSolarSystem() {
       mesh.userData.moons = [];
       for (const m of p.moons) {
         const moonRadius = m.radius * SOLAR_BODY_VISUAL_SCALE;
+        // Scale moon orbit distance to match the inflated planet size so
+        // they don't end up *inside* the parent (planets are drawn 14x).
+        const moonOrbit = m.orbit * SOLAR_BODY_VISUAL_SCALE;
         const mGeo = new THREE.IcosahedronGeometry(moonRadius, m.radius > 1000 ? 1 : 0);
         const mMat = new THREE.MeshStandardMaterial({ color: m.color, flatShading: true, roughness: 1 });
         const mMesh = new THREE.Mesh(mGeo, mMat);
@@ -78,7 +81,7 @@ export function buildSolarSystem() {
         mesh.userData.moons.push({
           mesh: mMesh,
           radius: moonRadius,
-          orbit: m.orbit,
+          orbit: moonOrbit,
           period: m.period,             // days; negative = retrograde
           angle: Math.random() * Math.PI * 2,
         });
