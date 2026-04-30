@@ -1,6 +1,7 @@
-// Multiplayer using Trystero (WebRTC + BitTorrent-tracker signaling).
-// PeerJS's public broker (0.peerjs.com) was unreliable; trystero uses multiple
-// redundant trackers, so there's no single broker to fail.
+// Multiplayer using Trystero over MQTT (HiveMQ public broker).
+// MQTT is a standard IoT pub/sub messaging protocol; we only use it to
+// exchange the WebRTC handshake (a few hundred bytes per peer). No
+// BitTorrent / file-sharing traffic is involved.
 //
 // Topology: star — host owns the simulation and broadcasts the roster every
 // tick. Joiners send their own state to the host, which the host re-publishes.

@@ -9,12 +9,12 @@
 {
   "imports": {
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "trystero": "https://esm.sh/trystero@0.21.0/torrent"
+    "trystero": "https://esm.sh/trystero@0.21.0/mqtt"
   }
 }
 </script>
-<!-- Multiplayer signaling uses Trystero over BitTorrent trackers
-     (multiple redundant servers; no single broker to fail). -->
+<!-- Multiplayer signaling uses Trystero over MQTT (HiveMQ public broker:
+     a standard IoT pub/sub service — nothing peer-to-peer file sharing). -->
 </head>
 <body>
   <canvas id="view"></canvas>
