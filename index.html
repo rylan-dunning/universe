@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cosmoscope — Explore the Universe to Scale</title>
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<!-- PeerJS: WebRTC peer-to-peer with a free public signaling broker.
+     Lets us run multiplayer entirely from a static GitHub Pages site. -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- Startup lobby: choose Solo / Join / Host. Hidden once the user picks. -->
+  <div id="lobby">
+    <div class="lobby-card">
+      <h1>Cosmoscope</h1>
+      <p class="lobby-tagline">A real-scale tour of the universe.</p>
+
+      <button id="btn-solo" class="lobby-btn primary">Play Solo</button>
+
+      <div class="lobby-row">
+        <input id="join-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" />
+        <button id="btn-join" class="lobby-btn">Join Room</button>
+      </div>
+      <label class="lobby-checkbox">
+        <input id="join-follow" type="checkbox" />
+        <span>Follow the host (auto-pilot — no controls)</span>
+      </label>
+
+      <div class="lobby-divider">— or —</div>
+      <button id="btn-host" class="lobby-btn">Host a Room</button>
+
+      <div id="lobby-status"></div>
+    </div>
+  </div>
+
+  <!-- In-game multiplayer status (top center). -->
+  <div id="mp-status" class="hidden">
+    <span class="k">Room</span> <span id="mp-code">—</span>
+    <span class="sep">·</span>
+    <span id="mp-role">—</span>
+    <span class="sep">·</span>
+    <span id="mp-peers">0 connected</span>
+  </div>
+
+  <div id="hud">
+    <div class="row"><span class="k">Scale</span><span id="hud-scale">—</span></div>
+    <div class="row"><span class="k">Ship length</span><span id="hud-ship">—</span></div>
+    <div class="row"><span class="k">Speed</span><span id="hud-speed">—</span></div>
+    <div class="row"><span class="k">Throttle</span><span id="hud-throttle">0%</span></div>
+    <div class="row"><span class="k">Nearest</span><span id="hud-near">—</span></div>
+    <div class="row"><span class="k">Distance</span><span id="hud-dist">—</span></div>
+  </div>
+
+  <div id="search">
+    <input id="search-input" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Search planets, stars, galaxies…" />
+    <div id="search-results" class="hidden"></div>
+  </div>
+
+  <div id="info">
+    <div class="title">In this scale</div>
+    <div class="row"><span class="k">Ship vs context</span><span id="info-context">—</span></div>
+    <div class="row"><span class="k">Speed</span><span id="info-speed">—</span></div>
+    <div class="row"><span class="k">Kinetic energy</span><span id="info-energy">—</span></div>
+    <div class="row metaphor"><span id="info-metaphor">—</span></div>
+  </div>
+
+  <div id="reticle"></div>
+  <div id="labels-root"></div>
+  <div id="fade"></div>
+
+  <div id="card" class="hidden">
+    <button id="card-close" title="Close (Esc)">×</button>
+    <div id="card-name" class="name">—</div>
+    <div id="card-type" class="type">—</div>
+    <ul id="card-facts" class="facts"></ul>
+    <div class="hint">Press <b>Space</b> or click anywhere to resume flying.</div>
+  </div>
+
+  <div id="help">
+    <button id="help-toggle" title="Collapse / expand">−</button>
+    <h1>Cosmoscope</h1>
+    <div id="help-body">
+    <p>An educational tour of the real scale of the universe.</p>
+    <table>
+      <tr><td><b>W / S</b></td><td>Throttle + / −</td></tr>
+      <tr><td><b>A / D</b></td><td>Yaw left / right</td></tr>
+      <tr><td><b>↑ / ↓</b></td><td>Pitch</td></tr>
+      <tr><td><b>← / →</b></td><td>Roll</td></tr>
+      <tr><td><b>Shift</b></td><td>Boost ×10</td></tr>
+      <tr><td><b>Ctrl</b></td><td>Brake</td></tr>
+      <tr><td><b>Space</b></td><td>Full stop</td></tr>
+      <tr><td><b>1 / 2 / 3</b></td><td>Solar / Galaxy / Universe</td></tr>
+      <tr><td><b>[ / ]</b></td><td>Shrink / grow ship</td></tr>
+      <tr><td><b>Drag</b></td><td>Look around</td></tr>
+      <tr><td><b>Scroll</b></td><td>Zoom in / out</td></tr>
+      <tr><td><b>R</b></td><td>Reset orientation</td></tr>
+      <tr><td><b>H</b></td><td>Toggle help</td></tr>
+    </table>
+    <p class="hint">Click anywhere to begin.</p>
+    </div>
+  </div>
+
+  <button id="settings-btn" title="Ship customization">⚙</button>
+
+  <div id="settings" class="hidden">
+    <div class="settings-header">
+      <span class="title">Ship Customization</span>
+      <button id="settings-close" title="Close">×</button>
+    </div>
+    <div class="settings-body">
+      <div class="row"><span class="k">Body</span><div class="opts" id="opt-body"></div></div>
+      <div class="row"><span class="k">Wings</span><div class="opts" id="opt-wings"></div></div>
+      <div class="row"><span class="k">Fin</span><div class="opts" id="opt-fin"></div></div>
+      <div class="row"><span class="k">Booster</span><div class="opts" id="opt-booster"></div></div>
+      <div class="row"><span class="k">Flame</span><div class="opts" id="opt-flame"></div></div>
+      <div class="row"><span class="k">Hull color</span><div class="opts" id="opt-hullColor"></div></div>
+      <div class="row"><span class="k">Accent color</span><div class="opts" id="opt-accentColor"></div></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
