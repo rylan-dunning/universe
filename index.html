@@ -72,10 +72,20 @@
   <div id="hud">
     <div class="row"><span class="k">Scale</span><span id="hud-scale">—</span></div>
     <div class="row"><span class="k">Ship length</span><span id="hud-ship">—</span></div>
-    <div class="row"><span class="k">Speed</span><span id="hud-speed">—</span></div>
+    <div class="row"><span class="k">Speed</span><button id="hud-speed" class="hud-link" type="button" title="Show speed comparisons">—</button></div>
     <div class="row"><span class="k">Throttle</span><span id="hud-throttle">0%</span></div>
     <div class="row"><span class="k">Nearest</span><span id="hud-near">—</span></div>
     <div class="row"><span class="k">Distance</span><span id="hud-dist">—</span></div>
+    <div class="row"><span class="k">Headed to</span><span id="hud-pointed">—</span></div>
+  </div>
+
+  <div id="speed-popover" class="hidden">
+    <div class="title">Relative Speed</div>
+    <div class="speed-current" id="speed-popover-current">—</div>
+    <div class="row"><span class="k">Fastest car ever</span><span id="speed-vs-car">—</span></div>
+    <div class="row"><span class="k">Fastest jet ever</span><span id="speed-vs-jet">—</span></div>
+    <div class="row"><span class="k">Fastest man-made object</span><span id="speed-vs-object">—</span></div>
+    <div class="hint">References: ThrustSSC, X-15, Parker Solar Probe.</div>
   </div>
 
   <div id="search">
@@ -125,8 +135,13 @@
       <tr><td><b>F</b></td><td>Fire (during invasion)</td></tr>
       <tr><td><b>H</b></td><td>Toggle help</td></tr>
     </table>
-    <p class="hint">Click anywhere to begin.</p>
     </div>
+  </div>
+
+  <div id="minimap">
+    <div class="title">Solar Map</div>
+    <canvas id="minimap-canvas" width="180" height="180"></canvas>
+    <div id="minimap-status">Sun-centered overview</div>
   </div>
 
   <button id="settings-btn" title="Ship customization">⚙</button>

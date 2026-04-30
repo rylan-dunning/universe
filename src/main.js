@@ -40,6 +40,24 @@ const ship = new Ship();
 const hud = new Hud();
 const scales = new ScaleManager();
 const labels = new Labels(document.getElementById('labels-root'), onBodyClick);
+const speedPopoverEl = document.getElementById('speed-popover');
+const speedPopoverCurrentEl = document.getElementById('speed-popover-current');
+const speedVsCarEl = document.getElementById('speed-vs-car');
+const speedVsJetEl = document.getElementById('speed-vs-jet');
+const speedVsObjectEl = document.getElementById('speed-vs-object');
+const minimapEl = document.getElementById('minimap');
+const minimapCanvas = document.getElementById('minimap-canvas');
+const minimapStatusEl = document.getElementById('minimap-status');
+const minimapCtx = minimapCanvas.getContext('2d');
+
+const SPEED_REFERENCES = {
+  car: { label: 'ThrustSSC', mps: 341.1 },
+  jet: { label: 'X-15', mps: 2020 },
+  object: { label: 'Parker Solar Probe', mps: 192000 },
+};
+
+const MINIMAP_PADDING = 18;
+const MINIMAP_MAX_ORBIT = 4_500_000_000;
 
 // ---- Info card (basic facts about a body the player visited) ----
 const card = {
@@ -52,6 +70,17 @@ const card = {
 document.getElementById('card-close').addEventListener('click', closeCard);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' || e.key === ' ') closeCard();
+});
+
+hud.speed.addEventListener('mousedown', (e) => e.stopPropagation());
+hud.speed.addEventListener('click', (e) => {
+  e.stopPropagation();
+  speedPopoverEl.classList.toggle('hidden');
+});
+document.addEventListener('mousedown', (e) => {
+  if (speedPopoverEl.classList.contains('hidden')) return;
+  if (e.target === hud.speed || hud.speed.contains(e.target) || speedPopoverEl.contains(e.target)) return;
+  speedPopoverEl.classList.add('hidden');
 });
 
 function onBodyClick(body) {
@@ -140,6 +169,15 @@ const follow = {
   standoff: 0,               // distance from body
 };
 
+const _pointedPos = new THREE.Vector3();
+const _pointedDir = new THREE.Vector3();
+const _shipForward = new THREE.Vector3();
+let _pointedBody = null;
+let _pointedHold = 0;
+const POINTED_ACQUIRE_DOT = 0.2;
+const POINTED_KEEP_DOT = -0.05;
+const POINTED_HOLD_SEC = 0.6;
+
 // ---- Tier transition state ----
 // Transitions go: pull camera waaay out from current tier (1.0s), swap tier,
 // snap camera in close to new ship (instant), then ease camera back to normal
@@ -188,6 +226,15 @@ canvas.addEventListener('mousemove', (e) => {
   dragLastY = e.clientY;
   // Convert pixels to radians (~360° across the screen).
   const k = (Math.PI * 2) / Math.max(window.innerWidth, window.innerHeight);
+
+  if (follow.active && follow.body) {
+    const orbitUp = new THREE.Vector3(0, 1, 0);
+    const orbitRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+    follow.dir.applyAxisAngle(orbitUp, -dx * k);
+    follow.dir.applyAxisAngle(orbitRight, -dy * k).normalize();
+    return;
+  }
+
   dragYaw   -= dx * k;
   dragPitch -= dy * k;
   // Clamp pitch so the camera doesn't flip over.
@@ -201,9 +248,8 @@ window.addEventListener('mouseup', (e) => {
   const dx = e.clientX - _downX;
   const dy = e.clientY - _downY;
   const moved = (dx * dx + dy * dy) > 16; // > 4 px = drag, not click
-  // A genuine click on empty space hides help and closes the card.
+  // A genuine click on empty space closes the card, but does NOT hide help/instructions.
   if (!moved) {
-    hud.hideHelp();
     closeCard();
     canvas.focus();
   }
@@ -334,43 +380,209 @@ function frame(now) {
 
   renderer.render(tier.scene, camera);
   labels.update(camera, window.innerWidth, window.innerHeight);
-    // Lock-on ETA logic: if a label is locked, compute time to arrival
-    if (labels.lockedIdx !== -1) {
-      const entry = labels.entries[labels.lockedIdx];
-      const planetPos = new THREE.Vector3();
-      entry.body.mesh.getWorldPosition(planetPos);
-      const shipPos = scales.shipWorldPos;
-      const toPlanet = new THREE.Vector3().subVectors(planetPos, shipPos);
-      const dist = toPlanet.length();
-      // Project ship velocity onto approach vector
-      const v = ship.velocity.clone();
-      const speed = v.length();
-      let etaStr = '';
-      if (speed > 1e-3) {
-        const approach = v.dot(toPlanet.normalize());
-        if (approach > 1e-3) {
-          const etaSec = dist / (approach * scales.active.units.metersPerUnit); // dist in units, speed in units/sec
-          if (etaSec < 1e6) {
-            const min = Math.floor(etaSec / 60);
-            const sec = Math.floor(etaSec % 60);
-            etaStr = `Arrival: ${min > 0 ? min + 'm ' : ''}${sec}s`;
-          } else {
-            etaStr = 'Arrival: —';
-          }
-        } else {
-          etaStr = 'Arrival: —';
-        }
-      } else {
-        etaStr = 'Arrival: —';
-      }
-      labels.eta = etaStr;
-    } else {
-      labels.eta = null;
+
+  // --- Headed-to HUD logic ---
+  // Bodies are evaluated in ship-relative scene coordinates, so target
+  // selection remains stable with the floating-origin scene shift.
+  const bodies = tier.nearestBodies || [];
+  _shipForward.set(0, 0, -1).applyQuaternion(ship.quat).normalize();
+
+  let bestBody = null;
+  let bestDot = -Infinity;
+  for (const body of bodies) {
+    body.mesh.getWorldPosition(_pointedPos);
+    const centerDist = _pointedPos.length();
+    if (centerDist < 1e-9) continue;
+    _pointedDir.copy(_pointedPos).multiplyScalar(1 / centerDist);
+    const dot = _shipForward.dot(_pointedDir);
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestBody = body;
     }
+  }
+
+  let currentDot = -Infinity;
+  if (_pointedBody) {
+    _pointedBody.mesh.getWorldPosition(_pointedPos);
+    const currentDist = _pointedPos.length();
+    if (currentDist > 1e-9) {
+      _pointedDir.copy(_pointedPos).multiplyScalar(1 / currentDist);
+      currentDot = _shipForward.dot(_pointedDir);
+    }
+  }
+
+  if (_pointedBody && currentDot >= POINTED_KEEP_DOT) {
+    _pointedHold = POINTED_HOLD_SEC;
+  } else if (bestBody && bestDot >= POINTED_ACQUIRE_DOT) {
+    _pointedBody = bestBody;
+    _pointedHold = POINTED_HOLD_SEC;
+  } else if (_pointedHold > 0 && _pointedBody) {
+    _pointedHold = Math.max(0, _pointedHold - dt);
+  } else {
+    _pointedBody = null;
+  }
+
+  if (_pointedBody) {
+    _pointedBody.mesh.getWorldPosition(_pointedPos);
+    const centerDist = _pointedPos.length();
+    const surfaceDist = Math.max(0, centerDist - (_pointedBody.radius || 0));
+    const etaStr = formatEtaSeconds(surfaceDist, ship.velocity, _pointedPos);
+    hud.set('pointed', `${_pointedBody.name} (${etaStr})`);
+  } else {
+    hud.set('pointed', '—');
+  }
+
+  updateSpeedPopover(speedMps);
+  drawMiniMap();
   updatePeerGhosts();
   watchTierForInvasion();
   updateInvasion(dt, input);
   requestAnimationFrame(frame);
+}
+
+function updateSpeedPopover(speedMps) {
+  speedPopoverCurrentEl.textContent = `${formatSpeed(speedMps)}  |  ${formatSpeedTerrestrial(speedMps)}`;
+  speedVsCarEl.textContent = formatReferenceRatio(speedMps, SPEED_REFERENCES.car);
+  speedVsJetEl.textContent = formatReferenceRatio(speedMps, SPEED_REFERENCES.jet);
+  speedVsObjectEl.textContent = formatReferenceRatio(speedMps, SPEED_REFERENCES.object);
+}
+
+function formatReferenceRatio(speedMps, reference) {
+  if (!Number.isFinite(speedMps) || speedMps <= 0) return `0.00x ${reference.label}`;
+  const ratio = speedMps / reference.mps;
+  const digits = ratio >= 100 ? 0 : ratio >= 10 ? 1 : 2;
+  return `${ratio.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits })}x ${reference.label}`;
+}
+
+function drawMiniMap() {
+  const ctx = minimapCtx;
+  const w = minimapCanvas.width;
+  const h = minimapCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const mapRadius = Math.min(w, h) * 0.5 - MINIMAP_PADDING;
+
+  ctx.fillStyle = 'rgba(2, 6, 14, 0.9)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, mapRadius + 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(122, 215, 255, 0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, mapRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(122, 215, 255, 0.08)';
+  ctx.beginPath();
+  ctx.moveTo(cx - mapRadius, cy);
+  ctx.lineTo(cx + mapRadius, cy);
+  ctx.moveTo(cx, cy - mapRadius);
+  ctx.lineTo(cx, cy + mapRadius);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffcf73';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(122, 215, 255, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, mapRadius * 0.33, 0, Math.PI * 2);
+  ctx.arc(cx, cy, mapRadius * 0.66, 0, Math.PI * 2);
+  ctx.stroke();
+
+  if (scales.activeIndex !== 0) {
+    minimapStatusEl.textContent = 'Top-down ecliptic view available in Solar scale';
+    return;
+  }
+
+  const solarTier = scales.ensureTier(0);
+  const bodies = solarTier.nearestBodies || [];
+  for (const body of bodies) {
+    if (!body.orbit) continue;
+    const ringRadius = solarMapRadius(body.orbit, mapRadius);
+    ctx.strokeStyle = 'rgba(122, 215, 255, 0.07)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const point = solarMapPoint(body.mesh.position.x, body.mesh.position.z, mapRadius);
+    ctx.fillStyle = body.name === 'Earth' ? '#8fd4ff' : 'rgba(210, 232, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, body.name === 'Earth' ? 2.4 : 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const shipPoint = solarMapPoint(scales.shipWorldPos.x, scales.shipWorldPos.z, mapRadius);
+  const shipForward = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
+  const heading2D = new THREE.Vector2(shipForward.x, shipForward.z);
+  const headingAngle = heading2D.lengthSq() > 1e-8 ? Math.atan2(heading2D.y, heading2D.x) : 0;
+  drawMiniMapShipArrow(ctx, shipPoint.x, shipPoint.y, headingAngle);
+
+  const shipSunDist = Math.hypot(scales.shipWorldPos.x, scales.shipWorldPos.z) / 149_597_870.7;
+  minimapStatusEl.textContent = `${shipSunDist.toFixed(2)} AU from Sun · top-down ecliptic`;
+}
+
+function solarMapRadius(distanceKm, mapRadius) {
+  return (Math.log10(1 + distanceKm) / Math.log10(1 + MINIMAP_MAX_ORBIT)) * mapRadius;
+}
+
+function solarMapPoint(x, z, mapRadius) {
+  const radius = solarMapRadius(Math.hypot(x, z), mapRadius);
+  const angle = Math.atan2(z, x);
+  return {
+    x: minimapCanvas.width * 0.5 + Math.cos(angle) * radius,
+    y: minimapCanvas.height * 0.5 - Math.sin(angle) * radius,
+  };
+}
+
+function drawMiniMapShipArrow(ctx, x, y, angle) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-angle);
+
+  ctx.strokeStyle = 'rgba(255, 120, 120, 0.45)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ff5a5a';
+  ctx.strokeStyle = '#fff2f2';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(10, 0);
+  ctx.lineTo(-6, -5);
+  ctx.lineTo(-2, 0);
+  ctx.lineTo(-6, 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function formatEtaSeconds(distanceUnits, velocity, toBody) {
+  const speed = velocity.length();
+  if (distanceUnits <= 0) return '0s';
+  if (speed <= 1e-3) return '—';
+
+  const closingSpeed = velocity.dot(_pointedDir.copy(toBody).normalize());
+  if (closingSpeed <= 1e-3) return '—';
+
+  const etaSec = distanceUnits / closingSpeed;
+  if (!Number.isFinite(etaSec) || etaSec >= 1e8) return '—';
+
+  const hours = Math.floor(etaSec / 3600);
+  const min = Math.floor((etaSec % 3600) / 60);
+  const sec = Math.ceil(etaSec % 60);
+  if (hours > 0) return `${hours}h ${min}m`;
+  if (min > 0) return `${min}m ${sec}s`;
+  return `${sec}s`;
 }
 
 // Human description of the ship's size relative to the active scale.
@@ -633,16 +845,24 @@ helpToggle.addEventListener('click', (e) => {
 const settingsBtn = document.getElementById('settings-btn');
 const settingsEl = document.getElementById('settings');
 const settingsClose = document.getElementById('settings-close');
+
+function syncOverlayLayout() {
+  minimapEl.classList.toggle('raised', !settingsEl.classList.contains('hidden'));
+}
+
 settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   settingsEl.classList.toggle('hidden');
+  syncOverlayLayout();
 });
 settingsClose.addEventListener('click', (e) => {
   e.stopPropagation();
   settingsEl.classList.add('hidden');
+  syncOverlayLayout();
 });
 // Don't let clicks inside the panel close the card / blur the input.
 settingsEl.addEventListener('mousedown', (e) => e.stopPropagation());
+syncOverlayLayout();
 
 function buildShipOptions() {
   const labelMap = {

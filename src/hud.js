@@ -7,6 +7,7 @@ export class Hud {
     this.near     = document.getElementById('hud-near');
     this.dist     = document.getElementById('hud-dist');
     this.context  = document.getElementById('info-context');
+    this.pointed  = document.getElementById('hud-pointed');
     this.infoSpeed   = document.getElementById('info-speed');
     this.energy   = document.getElementById('info-energy');
     this.metaphor = document.getElementById('info-metaphor');

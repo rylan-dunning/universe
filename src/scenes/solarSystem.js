@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { SUN, PLANETS, KM_PER_AU } from '../data.js';
 
+const SOLAR_BODY_VISUAL_SCALE = 14;
+
 // Solar system scene. World units = kilometers.
 // At 1 unit = 1 km, Sun radius = 696,340; Neptune orbit ~ 4.5e9. Float32 holds
 // this comfortably with a logarithmic depth buffer.
@@ -18,14 +20,15 @@ export function buildSolarSystem() {
   scene.add(fill);
 
   // Sun
-  const sunGeo = new THREE.IcosahedronGeometry(SUN.radius, 2);
+  const sunRadius = SUN.radius * SOLAR_BODY_VISUAL_SCALE;
+  const sunGeo = new THREE.IcosahedronGeometry(sunRadius, 2);
   const sunMat = new THREE.MeshBasicMaterial({ color: SUN.color });
   const sun = new THREE.Mesh(sunGeo, sunMat);
   scene.add(sun);
 
   // Sun corona (faceted halo)
   const corona = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(SUN.radius * 1.15, 1),
+    new THREE.IcosahedronGeometry(sunRadius * 1.15, 1),
     new THREE.MeshBasicMaterial({ color: 0xffae3a, transparent: true, opacity: 0.18, wireframe: true })
   );
   scene.add(corona);
@@ -34,13 +37,14 @@ export function buildSolarSystem() {
   scene.add(buildStarfield(60_000_000_000, 6000));
 
   // Planets
-  const bodies = [{ name: SUN.name, mesh: sun, radius: SUN.radius, orbit: 0, angle: 0, year: 1 }];
+  const bodies = [{ name: SUN.name, mesh: sun, radius: sunRadius, orbit: 0, angle: 0, year: 1 }];
   const planetMats = new Map();
 
   for (const p of PLANETS) {
     const mat = new THREE.MeshStandardMaterial({ color: p.color, flatShading: true, roughness: 0.85 });
     planetMats.set(p.name, mat);
-    const geo = new THREE.IcosahedronGeometry(p.radius, p.radius > 30000 ? 2 : 1);
+    const visualRadius = p.radius * SOLAR_BODY_VISUAL_SCALE;
+    const geo = new THREE.IcosahedronGeometry(visualRadius, p.radius > 30000 ? 2 : 1);
     const mesh = new THREE.Mesh(geo, mat);
     const angle = Math.random() * Math.PI * 2;
     mesh.position.set(Math.cos(angle) * p.orbit, 0, Math.sin(angle) * p.orbit);
@@ -52,26 +56,28 @@ export function buildSolarSystem() {
     // Saturn rings
     if (p.ring) {
       const ring = new THREE.Mesh(
-        new THREE.RingGeometry(p.ring[0], p.ring[1], 64, 1),
+        new THREE.RingGeometry(p.ring[0] * SOLAR_BODY_VISUAL_SCALE, p.ring[1] * SOLAR_BODY_VISUAL_SCALE, 64, 1),
         new THREE.MeshBasicMaterial({ color: 0xddc28a, side: THREE.DoubleSide, transparent: true, opacity: 0.6 })
       );
       ring.rotation.x = Math.PI / 2 + 0.3;
       mesh.add(ring);
     }
 
-    bodies.push({ name: p.name, mesh, radius: p.radius, orbit: p.orbit, angle, year: p.year });
+    bodies.push({ name: p.name, mesh, radius: visualRadius, orbit: p.orbit, angle, year: p.year });
 
     // Moons: orbit their parent planet. Not searchable / not labeled — purely
     // visual flavor.
     if (p.moons) {
       mesh.userData.moons = [];
       for (const m of p.moons) {
-        const mGeo = new THREE.IcosahedronGeometry(m.radius, m.radius > 1000 ? 1 : 0);
+        const moonRadius = m.radius * SOLAR_BODY_VISUAL_SCALE;
+        const mGeo = new THREE.IcosahedronGeometry(moonRadius, m.radius > 1000 ? 1 : 0);
         const mMat = new THREE.MeshStandardMaterial({ color: m.color, flatShading: true, roughness: 1 });
         const mMesh = new THREE.Mesh(mGeo, mMat);
         scene.add(mMesh);
         mesh.userData.moons.push({
           mesh: mMesh,
+          radius: moonRadius,
           orbit: m.orbit,
           period: m.period,             // days; negative = retrograde
           angle: Math.random() * Math.PI * 2,
@@ -112,7 +118,7 @@ export function buildSolarSystem() {
   const earthBody = bodies.find(b => b.name === 'Earth');
   const moonObjs = [];
   for (const b of bodies) {
-    if (b.mesh.userData.moons) for (const m of b.mesh.userData.moons) moonObjs.push({ name: '_moon', mesh: m.mesh, radius: 100 });
+    if (b.mesh.userData.moons) for (const m of b.mesh.userData.moons) moonObjs.push({ name: '_moon', mesh: m.mesh, radius: m.radius || 100 });
   }
 
   return {
@@ -124,7 +130,7 @@ export function buildSolarSystem() {
     // Only the Sun, planets, and Earth's Moon are clickable / labeled.
     nearestBodies: bodies.concat(
       earthBody && earthBody.mesh.userData.moons
-        ? [{ name: 'Moon', mesh: earthBody.mesh.userData.moons[0].mesh, radius: 1737 }]
+        ? [{ name: 'Moon', mesh: earthBody.mesh.userData.moons[0].mesh, radius: earthBody.mesh.userData.moons[0].radius || 1737 }]
         : []
     ),
   };

@@ -50,6 +50,77 @@ html, body {
   line-height: 1.55;
 }
 
+.hud-link {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  pointer-events: auto;
+  text-align: right;
+}
+
+.hud-link:hover,
+.hud-link:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#speed-popover {
+  position: fixed;
+  top: 174px;
+  left: 12px;
+  min-width: 300px;
+  max-width: 360px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  z-index: 6;
+  pointer-events: auto;
+}
+
+#speed-popover.hidden {
+  display: none;
+}
+
+#speed-popover .title {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+#speed-popover .speed-current {
+  color: #fff;
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+#speed-popover .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  line-height: 1.55;
+}
+
+#speed-popover .k {
+  color: var(--dim);
+}
+
+#speed-popover .hint {
+  color: var(--dim);
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 6px;
+}
+
 #hud .k {
   color: var(--dim);
 }
@@ -153,40 +224,6 @@ html, body {
 }
 .label.clamped {
   color: #ffe5a0;
-}
-
-.label.locked {
-  box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80;
-  border: 2px solid #7ad7ff;
-  background: rgba(122, 215, 255, 0.10);
-  animation: lockon-box-draw 0.5s cubic-bezier(.4,2,.6,1) 1;
-  position: relative;
-  z-index: 10;
-}
-.label.locked .txt {
-  font-weight: bold;
-  color: #fff;
-  letter-spacing: 0.09em;
-}
-.label .eta {
-  display: block;
-  margin-top: 2px;
-  font-size: 10px;
-  color: #ffd57a;
-  background: rgba(0,0,0,0.25);
-  border-radius: 3px;
-  padding: 1px 6px;
-  text-align: center;
-  animation: eta-fadein 0.4s cubic-bezier(.4,2,.6,1) 1;
-}
-@keyframes lockon-box-draw {
-  0%   { box-shadow: 0 0 0 0 #7ad7ff, 0 0 0 0 #7ad7ff00; border-color: #7ad7ff00; }
-  60%  { box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80; border-color: #7ad7ff; }
-  100% { box-shadow: 0 0 0 2px #7ad7ff, 0 0 12px 2px #7ad7ff80; border-color: #7ad7ff; }
-}
-@keyframes eta-fadein {
-  0%   { opacity: 0; transform: translateY(-8px); }
-  100% { opacity: 1; transform: translateY(0); }
 }
 
 #fade {
@@ -330,6 +367,49 @@ html, body {
   padding: 0;
 }
 #help-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ---- Solar minimap ---- */
+#minimap {
+  position: fixed;
+  right: 12px;
+  bottom: 60px;
+  width: 180px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  z-index: 6;
+  transition: bottom .2s ease;
+  pointer-events: none;
+}
+
+#minimap.raised {
+  bottom: 420px;
+}
+
+#minimap .title {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+#minimap-canvas {
+  display: block;
+  width: 160px;
+  height: 160px;
+  margin: 0 auto;
+}
+
+#minimap-status {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: center;
+  min-height: 16px;
+}
 
 /* ---- Settings (ship customization) ---- */
 #settings-btn {
