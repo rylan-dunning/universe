@@ -70,13 +70,19 @@
   </div>
 
   <div id="hud">
-    <div class="row"><span class="k">Scale</span><span id="hud-scale">—</span></div>
-    <div class="row"><span class="k">Ship length</span><span id="hud-ship">—</span></div>
-    <div class="row"><span class="k">Speed</span><button id="hud-speed" class="hud-link" type="button" title="Show speed comparisons">—</button></div>
-    <div class="row"><span class="k">Throttle</span><span id="hud-throttle">0%</span></div>
-    <div class="row"><span class="k">Nearest</span><span id="hud-near">—</span></div>
-    <div class="row"><span class="k">Distance</span><span id="hud-dist">—</span></div>
-    <div class="row"><span class="k">Headed to</span><span id="hud-pointed">—</span></div>
+    <div class="panel-header">
+      <div class="title">Flight</div>
+      <button id="hud-toggle" class="panel-toggle" type="button" title="Minimize flight panel">−</button>
+    </div>
+    <div class="panel-body">
+      <div class="row"><span class="k">Scale</span><span id="hud-scale">—</span></div>
+      <div class="row"><span class="k">Ship length</span><span id="hud-ship">—</span></div>
+      <div class="row"><span class="k">Speed</span><button id="hud-speed" class="hud-link" type="button" title="Show speed comparisons">—</button></div>
+      <div class="row"><span class="k">Throttle</span><span id="hud-throttle">0%</span></div>
+      <div class="row"><span class="k">Nearest</span><span id="hud-near">—</span></div>
+      <div class="row"><span class="k">Distance</span><span id="hud-dist">—</span></div>
+      <div class="row"><span class="k">Headed to</span><span id="hud-pointed">—</span></div>
+    </div>
   </div>
 
   <div id="speed-popover" class="hidden">
@@ -95,11 +101,16 @@
   </div>
 
   <div id="info">
-    <div class="title">In this scale</div>
-    <div class="row"><span class="k">Ship vs context</span><span id="info-context">—</span></div>
-    <div class="row"><span class="k">Speed</span><span id="info-speed">—</span></div>
-    <div class="row"><span class="k">Kinetic energy</span><span id="info-energy">—</span></div>
-    <div class="row metaphor"><span id="info-metaphor">—</span></div>
+    <div class="panel-header">
+      <div class="title">In this scale</div>
+      <button id="info-toggle" class="panel-toggle" type="button" title="Minimize scale panel">−</button>
+    </div>
+    <div class="panel-body">
+      <div class="row"><span class="k">Ship vs context</span><span id="info-context">—</span></div>
+      <div class="row"><span class="k">Speed</span><span id="info-speed">—</span></div>
+      <div class="row"><span class="k">Kinetic energy</span><span id="info-energy">—</span></div>
+      <div class="row metaphor"><span id="info-metaphor">—</span></div>
+    </div>
   </div>
 
   <div id="reticle"></div>

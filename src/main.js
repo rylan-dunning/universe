@@ -864,11 +864,27 @@ document.addEventListener('mousedown', (e) => {
 // ---------------------------------------------------------------------------
 const helpEl = document.getElementById('help');
 const helpToggle = document.getElementById('help-toggle');
+const hudEl = document.getElementById('hud');
+const hudToggle = document.getElementById('hud-toggle');
+const infoEl = document.getElementById('info');
+const infoToggle = document.getElementById('info-toggle');
+
+function bindPanelToggle(panelEl, toggleEl) {
+  if (!panelEl || !toggleEl) return;
+  toggleEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panelEl.classList.toggle('collapsed');
+    toggleEl.textContent = panelEl.classList.contains('collapsed') ? '+' : '−';
+  });
+}
+
 helpToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   helpEl.classList.toggle('collapsed');
   helpToggle.textContent = helpEl.classList.contains('collapsed') ? '+' : '−';
 });
+bindPanelToggle(hudEl, hudToggle);
+bindPanelToggle(infoEl, infoToggle);
 
 // ---------------------------------------------------------------------------
 // Ship customization panel.
