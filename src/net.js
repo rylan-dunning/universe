@@ -5,6 +5,40 @@
 const ROOM_PREFIX = 'cosmoscope-';
 const TICK_HZ = 12;                 // state broadcasts per second
 const FOLLOW_SPACING = 12;          // ship-lengths between followers in line
+const JOIN_TIMEOUT_MS = 15000;
+const MAX_HOST_CODE_ATTEMPTS = 6;
+
+const PEER_OPTIONS = {
+  host: '0.peerjs.com',
+  port: 443,
+  path: '/',
+  secure: true,
+  debug: 1,
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:openrelay.metered.ca:80' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
+    sdpSemantics: 'unified-plan',
+  },
+};
 
 function randomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -76,6 +110,30 @@ export class Net {
     this.localName = local.getName();
   }
 
+  _destroyPeer() {
+    if (this._tickTimer) clearInterval(this._tickTimer);
+    this._tickTimer = null;
+    if (this.peer) {
+      try { this.peer.destroy(); } catch (_) {}
+    }
+    this.peer = null;
+    this.connsById.clear();
+    this.peers.clear();
+    this.followers.length = 0;
+    this.hostId = null;
+    this.localId = null;
+  }
+
+  _friendlyError(err, fallback) {
+    const type = err && err.type ? err.type : '';
+    if (type === 'peer-unavailable') return 'Host not found. Ask the host to recreate the room and share the new code.';
+    if (type === 'network' || type === 'socket-error' || type === 'socket-closed') return 'Could not reach the multiplayer broker. Check your connection and try again.';
+    if (type === 'server-error') return 'Peer server error. Try again in a moment.';
+    if (type === 'browser-incompatible') return 'This browser does not support the required WebRTC features.';
+    if (type === 'ssl-unavailable') return 'Secure multiplayer is unavailable from the current PeerJS cloud endpoint.';
+    return (err && err.message) || fallback || String(err || 'Unknown multiplayer error');
+  }
+
   // -------------------- Solo --------------------
   startSolo() {
     this.mode = 'solo';
@@ -85,38 +143,47 @@ export class Net {
   // -------------------- Host --------------------
   host() {
     this.mode = 'host';
-    this.code = randomCode();
+    this._destroyPeer();
     return new Promise((resolve, reject) => {
-      this.peer = new window.Peer(ROOM_PREFIX + this.code, {
-        debug: 0,
-      });
-      this.peer.on('open', (id) => {
-        this.localId = id;
-        this.peer.on('connection', (conn) => this._handleHostConn(conn));
-        this._startTick();
-        resolve(this.code);
-      });
-      // The PeerJS public broker drops idle peers after a few minutes,
-      // which silently breaks new joins (existing data connections keep
-      // working but the broker no longer accepts new ones for our id).
-      // Reconnect re-registers the same id on the broker.
-      this.peer.on('disconnected', () => {
-        this.onStatus('broker disconnected — reconnecting');
-        try { this.peer.reconnect(); } catch (_) { /* will retry */ }
-      });
-      this.peer.on('error', (err) => {
-        // 'network'/'disconnected' style errors after open shouldn't reject
-        // the original host() promise (room already running). Only errors
-        // before open mean the room never started.
-        if (this.localId) {
-          this.onStatus('peer error: ' + (err && err.type ? err.type : err));
-          if (err && (err.type === 'network' || err.type === 'disconnected')) {
-            try { this.peer.reconnect(); } catch (_) {}
+      const tryCreateHost = (attempt) => {
+        this.code = randomCode();
+        const peer = new window.Peer(ROOM_PREFIX + this.code, PEER_OPTIONS);
+        this.peer = peer;
+
+        const failHost = (err) => {
+          const type = err && err.type ? err.type : '';
+          if (!this.localId && type === 'unavailable-id' && attempt < MAX_HOST_CODE_ATTEMPTS) {
+            try { peer.destroy(); } catch (_) {}
+            tryCreateHost(attempt + 1);
+            return;
           }
-          return;
-        }
-        reject(err);
-      });
+          this._destroyPeer();
+          reject(new Error(this._friendlyError(err, 'Could not start room')));
+        };
+
+        peer.on('open', (id) => {
+          this.localId = id;
+          peer.on('connection', (conn) => this._handleHostConn(conn));
+          this._startTick();
+          resolve(this.code);
+        });
+        peer.on('disconnected', () => {
+          this.onStatus('broker disconnected — reconnecting');
+          try { peer.reconnect(); } catch (_) {}
+        });
+        peer.on('error', (err) => {
+          if (this.localId) {
+            this.onStatus('peer error: ' + (err && err.type ? err.type : err));
+            if (err && (err.type === 'network' || err.type === 'disconnected' || err.type === 'socket-error')) {
+              try { peer.reconnect(); } catch (_) {}
+            }
+            return;
+          }
+          failHost(err);
+        });
+      };
+
+      tryCreateHost(0);
     });
   }
 
@@ -158,19 +225,38 @@ export class Net {
   join(code, follow) {
     this.mode = 'join';
     this.code = code.toUpperCase();
-    this.followingHost = !!follow;    return new Promise((resolve, reject) => {
-      this.peer = new window.Peer({ debug: 0 });
-      // Same broker-drop reconnect logic as host — keeps the joiner alive
-      // through long sessions.
+    this.followingHost = !!follow;
+    this._destroyPeer();
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeout = null;
+      let conn = null;
+
+      const failJoin = (err, fallback) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        try { conn?.close(); } catch (_) {}
+        this._destroyPeer();
+        reject(new Error(this._friendlyError(err, fallback)));
+      };
+
+      this.peer = new window.Peer(undefined, PEER_OPTIONS);
       this.peer.on('disconnected', () => {
         this.onStatus('broker disconnected — reconnecting');
         try { this.peer.reconnect(); } catch (_) {}
       });
       this.peer.on('open', (id) => {
         this.localId = id;
-        const conn = this.peer.connect(ROOM_PREFIX + this.code, { reliable: false });
-        const timeout = setTimeout(() => reject(new Error('Could not reach host (timeout)')), 8000);
+        conn = this.peer.connect(ROOM_PREFIX + this.code, {
+          reliable: false,
+          serialization: 'json',
+          metadata: { version: 1 },
+        });
+        timeout = setTimeout(() => failJoin(new Error('Could not reach host (timeout)'), 'Could not reach host (timeout)'), JOIN_TIMEOUT_MS);
         conn.on('open', () => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timeout);
           this.connsById.set('host', conn);
           this._startTick();
@@ -212,14 +298,18 @@ export class Net {
           }
         });
         conn.on('close', () => {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
+          if (!settled) {
+            failJoin({ type: 'peer-unavailable', message: 'Host closed the connection before join completed.' }, 'Host closed the connection.');
+            return;
+          }
           this.onStatus('disconnected from host');
           for (const id of [...this.peers.keys()]) this.onPeerLeave(id);
           this.peers.clear();
         });
-        conn.on('error', (e) => reject(e));
+        conn.on('error', (e) => failJoin(e, 'Could not open data connection to host'));
       });
-      this.peer.on('error', (err) => reject(err));
+      this.peer.on('error', (err) => failJoin(err, 'Could not initialize joiner peer'));
     });
   }
 
@@ -306,12 +396,7 @@ export class Net {
   }
 
   disconnect() {
-    if (this._tickTimer) clearInterval(this._tickTimer);
-    this._tickTimer = null;
-    if (this.peer) try { this.peer.destroy(); } catch (_) {}
-    this.peer = null;
-    this.connsById.clear();
-    this.peers.clear();
+    this._destroyPeer();
   }
 
   // ---- Runtime toggles, callable from the in-game UI ----
