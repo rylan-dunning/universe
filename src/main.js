@@ -851,14 +851,37 @@ searchInput.addEventListener('keydown', (e) => {
 });
 // Don't propagate keyup either, so Controls doesn't see typing.
 searchInput.addEventListener('keyup',   (e) => e.stopPropagation());
-// Hide dropdown when clicking outside.
-document.addEventListener('mousedown', (e) => {
+// Hide dropdown when clicking outside, and on mobile close all open panels.
+document.addEventListener('pointerdown', (e) => {
+  const isMobile = document.body.classList.contains('is-mobile');
+
+  // --- Search ---
   if (!searchBox.contains(e.target)) {
     searchResults.classList.add('hidden');
-    // On mobile, also collapse the search bar back to a magnifier icon
-    // when the user taps outside it.
-    if (document.body.classList.contains('is-mobile')) {
-      searchBox.classList.remove('expanded');
+    if (isMobile) searchBox.classList.remove('expanded');
+  }
+
+  // --- Mobile: close any expanded panel whose element doesn't contain the tap ---
+  if (isMobile) {
+    const helpElM   = document.getElementById('help');
+    const settingsElM = document.getElementById('settings');
+    const settingsBtnM = document.getElementById('settings-btn');
+    const hudElM    = document.getElementById('hud');
+    const infoElM   = document.getElementById('info');
+
+    if (helpElM && !helpElM.contains(e.target) && !helpElM.classList.contains('collapsed')) {
+      helpElM.classList.add('collapsed');
+    }
+    if (settingsElM && !settingsElM.contains(e.target) && !settingsBtnM?.contains(e.target)
+        && !settingsElM.classList.contains('hidden')) {
+      settingsElM.classList.add('hidden');
+      document.getElementById('minimap')?.classList.toggle('raised', false);
+    }
+    if (hudElM && !hudElM.contains(e.target) && !hudElM.classList.contains('collapsed')) {
+      hudElM.classList.add('collapsed');
+    }
+    if (infoElM && !infoElM.contains(e.target) && !infoElM.classList.contains('collapsed')) {
+      infoElM.classList.add('collapsed');
     }
   }
 });

@@ -859,10 +859,29 @@ html, body {
     font-weight: 700;
   }
   #help:not(.collapsed) {
-    padding: 14px 36px 14px 18px;
+    padding: 10px 14px 14px;
     background: var(--panel);
     border: 1px solid var(--border);
     backdrop-filter: blur(4px);
+    max-height: 70vh;
+    overflow-y: auto;
+    /* Ensure the toggle button is visible inside the panel on mobile. */
+    padding-right: 14px;
+  }
+  /* On mobile expanded state, move toggle into the flow at the top-right
+     of the panel header instead of being absolutely positioned. */
+  #help:not(.collapsed) #help-toggle {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    font-size: 16px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    color: var(--dim);
+    border: 1px solid var(--border);
+    z-index: 1;
   }
   /* Hide JS-toggled "+" / "−" text inside the round button — show "?"
      instead via CSS, then a "−" once expanded. */
