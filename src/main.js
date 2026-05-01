@@ -898,8 +898,12 @@ const mobileMQ = window.matchMedia('(pointer: coarse), (max-width: 900px)');
 function applyMobileMode(matches) {
   document.body.classList.toggle('is-mobile', matches);
   const helpElEarly = document.getElementById('help');
-  if (helpElEarly) {
-    if (matches) helpElEarly.classList.add('collapsed');
+  const hudElEarly = document.getElementById('hud');
+  const infoElEarly = document.getElementById('info');
+  if (matches) {
+    helpElEarly?.classList.add('collapsed');
+    hudElEarly?.classList.add('collapsed');
+    infoElEarly?.classList.add('collapsed');
   }
 }
 applyMobileMode(mobileMQ.matches);
