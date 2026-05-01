@@ -855,8 +855,55 @@ searchInput.addEventListener('keyup',   (e) => e.stopPropagation());
 document.addEventListener('mousedown', (e) => {
   if (!searchBox.contains(e.target)) {
     searchResults.classList.add('hidden');
+    // On mobile, also collapse the search bar back to a magnifier icon
+    // when the user taps outside it.
+    if (document.body.classList.contains('is-mobile')) {
+      searchBox.classList.remove('expanded');
+    }
   }
 });
+
+// Mobile search toggle: tap magnifier → expand to a full-width input bar.
+const searchToggleBtn = document.getElementById('search-toggle');
+if (searchToggleBtn) {
+  const expandSearch = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    searchBox.classList.add('expanded');
+    // Focus on the next frame so the now-visible input actually receives it
+    // (and shows the on-screen keyboard on mobile).
+    requestAnimationFrame(() => searchInput.focus());
+  };
+  searchToggleBtn.addEventListener('pointerdown', expandSearch);
+  searchToggleBtn.addEventListener('click', (e) => {
+    // Already handled by pointerdown — swallow the synthesized click.
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+// On Escape from the search input, also collapse on mobile.
+searchInput.addEventListener('blur', () => {
+  if (!document.body.classList.contains('is-mobile')) return;
+  // Small delay so a tap on a search result registers first.
+  setTimeout(() => {
+    if (document.activeElement !== searchInput && !searchInput.value.trim()) {
+      searchBox.classList.remove('expanded');
+    }
+  }, 150);
+});
+
+// Mark mobile / coarse-pointer environments so CSS can switch layout, and
+// start the help panel collapsed (as a "?" icon) on those devices.
+const mobileMQ = window.matchMedia('(pointer: coarse), (max-width: 900px)');
+function applyMobileMode(matches) {
+  document.body.classList.toggle('is-mobile', matches);
+  const helpElEarly = document.getElementById('help');
+  if (helpElEarly) {
+    if (matches) helpElEarly.classList.add('collapsed');
+  }
+}
+applyMobileMode(mobileMQ.matches);
+mobileMQ.addEventListener?.('change', (ev) => applyMobileMode(ev.matches));
 
 // ---------------------------------------------------------------------------
 // Help panel: collapse / expand button. Stays visible (just the title) when

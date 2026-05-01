@@ -382,6 +382,26 @@ html, body {
   z-index: 5;
   pointer-events: auto;
 }
+
+/* Magnifier toggle button — only visible on mobile (below). */
+#search-toggle {
+  display: none;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--accent);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+#search-toggle:hover { background: rgba(122, 215, 255, 0.18); }
+#search-toggle svg { display: block; }
 /* Restore HUD/info to original positions now that search is on the right. */
 #hud { top: 12px; }
 #info { top: 200px; }
@@ -719,13 +739,32 @@ html, body {
 }
 
 @media (pointer: coarse), (max-width: 900px) {
+  /* Search: collapsed magnifier icon at top-center; expands to full bar. */
   #search {
-    top: auto;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #search-toggle { display: inline-flex; }
+
+  #search-input,
+  #search-results { display: none; }
+
+  #search.expanded {
     left: 12px;
     right: 12px;
+    transform: none;
     width: auto;
+    align-items: stretch;
   }
+  #search.expanded #search-toggle { display: none; }
+  #search.expanded #search-input { display: block; }
+  #search.expanded #search-results:not(.hidden) { display: block; }
 
   #hud,
   #info,
@@ -739,7 +778,7 @@ html, body {
 
   #hud {
     min-width: 0;
-    width: calc(100vw - 24px);
+    max-width: 56vw;
     padding: 8px 10px;
     pointer-events: auto;
   }
@@ -773,16 +812,59 @@ html, body {
 
   #info {
     top: 178px;
-    width: calc(100vw - 24px);
+    max-width: 56vw;
     min-width: 0;
     pointer-events: auto;
   }
 
+  /* Help on mobile: starts as a "?" round button on the left side, above
+     the left touch pad. Tapping expands it into a readable panel. */
   #help {
-    left: auto;
-    right: 12px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    left: 12px;
+    right: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 168px);
     max-width: min(280px, calc(100vw - 24px));
+    padding: 0;
+    background: transparent;
+    border: none;
+    backdrop-filter: none;
+    transition: none;
+  }
+  #help.collapsed {
+    /* Compact circular "?" toggle. */
+    width: 40px;
+    height: 40px;
+    padding: 0;
+  }
+  #help.collapsed h1,
+  #help.collapsed #help-body {
+    display: none;
+  }
+  #help.collapsed #help-toggle {
+    position: static;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--panel);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  #help:not(.collapsed) {
+    padding: 14px 36px 14px 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+  }
+  /* Hide JS-toggled "+" / "−" text inside the round button — show "?"
+     instead via CSS, then a "−" once expanded. */
+  #help.collapsed #help-toggle { font-size: 0; }
+  #help.collapsed #help-toggle::after {
+    content: "?";
+    font-size: 18px;
+    color: var(--accent);
   }
 
   #help table {
@@ -822,16 +904,27 @@ html, body {
     width: auto;
   }
 
+  /* Scale-bar moves to the top-right (compact pill) so it stops fighting
+     the bottom touch pads. */
   #scale-bar {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
-    width: calc(100vw - 24px);
-    justify-content: center;
+    left: auto;
+    right: 12px;
+    bottom: auto;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    transform: none;
+    width: auto;
+    padding: 3px;
   }
 
   .scale-btn {
-    flex: 1;
-    padding: 10px 8px;
+    flex: 0 0 auto;
+    padding: 7px 10px;
     font-size: 10px;
+  }
+
+  /* Push the in-game multiplayer banner below the search icon row. */
+  #mp-status {
+    top: calc(env(safe-area-inset-top, 0px) + 56px);
   }
 
   #mobile-controls {
@@ -920,7 +1013,7 @@ html, body {
 
 @media (max-width: 640px) {
   #mp-status {
-    top: 8px;
+    top: calc(env(safe-area-inset-top, 0px) + 56px);
     left: 12px;
     right: 12px;
     width: auto;
